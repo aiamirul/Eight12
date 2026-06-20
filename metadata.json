@@ -1,0 +1,10 @@
+{
+  "name": "8Twelve Stock System",
+  "description": "A high-fidelity convenience store inventory management app supporting image recognition simulation, barcode scanning, location filters, CSV exports, change logs, and PDF printing.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
