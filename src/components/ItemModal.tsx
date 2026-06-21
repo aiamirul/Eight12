@@ -47,13 +47,13 @@ export const ItemModal: React.FC<ItemModalProps> = ({
   editingItem,
   prefilledBarcode = "",
 }) => {
-  const [articleCode, setArticleCode] = useState("");
+   const [articleCode, setArticleCode] = useState("");
   const [name, setName] = useState("");
   const [remark, setRemark] = useState("");
   const [location, setLocation] = useState(LOCATIONS[7]); // General shelf as default
   const [barcode, setBarcode] = useState("");
   const [category, setCategory] = useState(CATEGORIES[8]); // General inventory
-  const [stock, setStock] = useState<number>(0);
+  const [stock, setStock] = useState<number | "">("");
   const [aliasInput, setAliasInput] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
@@ -83,7 +83,7 @@ export const ItemModal: React.FC<ItemModalProps> = ({
       setLocation(LOCATIONS[7]);
       setBarcode(prefilledBarcode);
       setCategory(CATEGORIES[8]);
-      setStock(0);
+      setStock("");
       setAliasInput("");
       setImageUrl("");
       setValidationError(null);
@@ -96,17 +96,14 @@ export const ItemModal: React.FC<ItemModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!articleCode.trim()) {
-      setValidationError("Article code is required.");
-      return;
-    }
     if (!name.trim()) {
       setValidationError("Product item name is required.");
       return;
     }
-    if (!barcode.trim()) {
-      setValidationError("Barcode serial number is required.");
-      return;
+
+    let finalArticleCode = articleCode.trim();
+    if (!finalArticleCode) {
+      finalArticleCode = Math.floor(100000 + Math.random() * 900000).toString();
     }
 
     // Parse aliases
@@ -115,15 +112,17 @@ export const ItemModal: React.FC<ItemModalProps> = ({
       .map((tag) => tag.trim())
       .filter((tag) => tag.length > 0);
 
+    const finalStock = stock === "" ? 0 : Number(stock);
+
     const savedItem: InventoryItem = {
-      id: articleCode.trim(),
-      articleCode: articleCode.trim(),
+      id: finalArticleCode,
+      articleCode: finalArticleCode,
       name: name.trim(),
       remark: remark.trim(),
       location,
       barcode: barcode.trim(),
       category,
-      stock,
+      stock: finalStock,
       imageUrl: imageUrl.trim() || undefined,
       aliases,
     };
@@ -284,21 +283,29 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                     id="modal-stock"
                     type="number"
                     min="0"
+                    placeholder="0"
                     value={stock}
-                    onChange={(e) => setStock(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setStock("");
+                      } else {
+                        setStock(Math.max(0, parseInt(val, 10) || 0));
+                      }
+                    }}
                     className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm font-mono font-bold focus:outline-none focus:border-emerald-600"
                   />
                   <div className="flex flex-col gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setStock((prev) => prev + 10)}
+                      onClick={() => setStock((prev) => (prev === "" ? 10 : prev + 10))}
                       className="px-2 py-0.5 bg-slate-200 hover:bg-slate-300 text-[10px] font-bold rounded"
                     >
                       +10
                     </button>
                     <button
                       type="button"
-                      onClick={() => setStock((prev) => Math.max(0, prev - 10))}
+                      onClick={() => setStock((prev) => (prev === "" ? 0 : Math.max(0, prev - 10)))}
                       className="px-2 py-0.5 bg-slate-200 hover:bg-slate-300 text-[10px] font-bold rounded"
                     >
                       -10

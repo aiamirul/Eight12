@@ -14,6 +14,7 @@ import { AisleVisualGuide } from "./components/AisleVisualGuide";
 import { ItemModal } from "./components/ItemModal";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { Html5Qrcode } from "html5-qrcode";
 import {
   Search,
   Plus,
@@ -33,45 +34,122 @@ import {
   X,
   History,
   Printer,
-  Copy
+  Copy,
+  Scan,
+  Camera,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 
-// Deterministic CSS Barcode Generator Component
+// Deterministic standard EAN-13 / UPC-A Barcode Generator Component
 function BarcodeVisual({ value }: { value: string }) {
   if (!value) return <span className="text-zinc-450">-</span>;
-  
-  // Calculate deterministic hash from characters
-  const hash = value.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) || 12345;
-  const linePattern: { type: "bar" | "gap"; width: number }[] = [];
-  
-  // Build 26 lines of deterministic alternating dark-light combinations
-  for (let i = 0; i < 26; i++) {
-    const isBar = i % 2 === 0;
-    if (isBar) {
-      const width = ((hash + i * i * 3) % 3) + 1; // 1px to 3px
-      linePattern.push({ type: "bar", width });
+
+  // Normalize string value to numeric digits. Convert letters/symbols to deterministic digits
+  let cleanValue = value.replace(/\s+/g, "");
+  let digits = "";
+  for (let i = 0; i < cleanValue.length; i++) {
+    const char = cleanValue[i];
+    if (/[0-9]/.test(char)) {
+      digits += char;
     } else {
-      const width = ((hash + i * 7) % 2) + 1; // 1px to 2px
-      linePattern.push({ type: "gap", width });
+      digits += String(char.charCodeAt(0) % 10);
     }
   }
 
+  // Ensure precisely 13 digits (standard EAN-13 sizing format)
+  if (digits.length < 13) {
+    while (digits.length < 13) {
+      digits += "0";
+    }
+  } else if (digits.length > 13) {
+    digits = digits.slice(0, 13);
+  }
+
+  // Standard EAN-13 Digit Codes
+  const L_CODE = [
+    "0001101", "0011001", "0010011", "0111101", "0100011",
+    "0110001", "0101111", "0111011", "0110111", "0001011"
+  ];
+  
+  const G_CODE = [
+    "0100111", "0110011", "0011011", "0100001", "0011101",
+    "0111001", "0000101", "0010001", "0001001", "0010111"
+  ];
+  
+  const R_CODE = [
+    "1110010", "1100110", "1101100", "1000010", "1011100",
+    "1001110", "1010000", "1000100", "1001000", "1110100"
+  ];
+
+  const PARITY_TABLE = [
+    ["L", "L", "L", "L", "L", "L"], // 0
+    ["L", "L", "G", "L", "G", "G"], // 1
+    ["L", "L", "G", "G", "L", "G"], // 2
+    ["L", "L", "G", "G", "G", "L"], // 3
+    ["L", "G", "L", "L", "G", "G"], // 4
+    ["L", "G", "G", "L", "L", "G"], // 5
+    ["L", "G", "G", "G", "L", "L"], // 6
+    ["L", "G", "L", "G", "L", "G"], // 7
+    ["L", "G", "L", "G", "G", "L"], // 8
+    ["L", "G", "G", "L", "G", "L"]  // 9
+  ];
+
+  const firstDigit = parseInt(digits[0], 10) || 0;
+  const parity = PARITY_TABLE[firstDigit];
+
+  // Construct standard 95-module barcode sequence ("1" = black bar, "0" = white gap)
+  let modules = "";
+
+  // Start Guard Pattern: 101
+  modules += "101";
+
+  // Left-hand digits (6 digits, each 7 modules)
+  for (let i = 1; i <= 6; i++) {
+    const digitValue = parseInt(digits[i], 10) || 0;
+    const type = parity[i - 1];
+    modules += type === "L" ? L_CODE[digitValue] : G_CODE[digitValue];
+  }
+
+  // Middle Guard Pattern: 01010
+  modules += "01010";
+
+  // Right-hand digits (6 digits, each 7 modules)
+  for (let i = 7; i <= 12; i++) {
+    const digitValue = parseInt(digits[i], 10) || 0;
+    modules += R_CODE[digitValue];
+  }
+
+  // End Guard Pattern: 101
+  modules += "101";
+
   return (
-    <div className="flex flex-col items-center justify-center select-none py-1">
-      {/* Visual Stripe Patterns */}
-      <div className="flex items-stretch h-6 bg-white px-1">
-        {linePattern.map((item, idx) => (
-          <div
-            key={idx}
-            className={`h-full ${item.type === "bar" ? "bg-zinc-950" : "bg-transparent"}`}
-            style={{ width: `${item.width}px` }}
-          />
-        ))}
+    <div className="flex flex-col items-center justify-center select-none py-1 w-32 md:w-36 mx-auto">
+      {/* 95 module layout rendered into exact same-width container */}
+      <div className="flex items-stretch w-full h-[26px] bg-white border border-zinc-200 p-0.5 rounded-sm shadow-[0_1px_2px_rgba(0,0,0,0.05)] justify-between">
+        {modules.split("").map((moduleValue, idx) => {
+          // Identify if it's a guard module so we can optionally style it or make it slightly longer
+          const isGuard = idx < 3 || (idx >= 45 && idx < 50) || idx >= 92;
+          return (
+            <div
+              key={idx}
+              className={`flex-grow h-full ${
+                moduleValue === "1" ? "bg-zinc-950" : "bg-transparent"
+              } ${isGuard ? "opacity-100" : "opacity-90"}`}
+              style={{
+                // Explicitly use clean sub-pixel layout so elements are perfectly equivalent
+                flexBasis: "0%",
+              }}
+            />
+          );
+        })}
       </div>
-      {/* Text Number Label underneath */}
-      <span className="text-[9px] font-mono font-black text-zinc-700 tracking-[0.12em] mt-0.5 print:text-[8px]">
-        {value}
-      </span>
+      {/* Human readable label centered with first digit on the far left, standard barcode aesthetic */}
+      <div className="flex items-center justify-between w-full px-1 mt-1 text-[8px] font-mono font-bold text-zinc-600 print:text-[7.5px]">
+        <span>{digits[0]}</span>
+        <span className="tracking-[0.14em] font-black text-zinc-800">{digits.slice(1, 7)}</span>
+        <span className="tracking-[0.14em] font-black text-zinc-800">{digits.slice(7, 13)}</span>
+      </div>
     </div>
   );
 }
@@ -166,6 +244,7 @@ export default function App() {
   // Feedback states
   const [alertMessage, setAlertMessage] = useState<{ type: "success" | "info"; text: string } | null>(null);
   const [localTime, setLocalTime] = useState("");
+  const userEmail = "docshabplt@gmail.com";
 
   // Drag and drop CSV upload
   const [csvDragActive, setCsvDragActive] = useState(false);
@@ -181,7 +260,73 @@ export default function App() {
   const [auditSearchQuery, setAuditSearchQuery] = useState("");
   const [selectedAuditItem, setSelectedAuditItem] = useState<InventoryItem | null>(null);
   const [auditNewStock, setAuditNewStock] = useState<number | "">("");
+  const [isCameraScanning, setIsCameraScanning] = useState(false);
+  const [camerasList, setCamerasList] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
   const [auditRemarks, setAuditRemarks] = useState("Audited Stock Adjustments");
+
+  // Step 1 collapse level
+  const [isStep1Collapsed, setIsStep1Collapsed] = useState(false);
+
+  // Beep sound volume and mute settings
+  const [beepVolume, setBeepVolume] = useState<number>(() => {
+    const saved = localStorage.getItem("8twelve_beep_volume");
+    return saved !== null ? Number(saved) : 60;
+  });
+  const [beepMuted, setBeepMuted] = useState<boolean>(() => {
+    return localStorage.getItem("8twelve_beep_muted") === "true";
+  });
+
+  const playBeepSoundAt = (currentVolume: number) => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      
+      gainNode.gain.setValueAtTime((currentVolume / 100) * 0.15, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.12);
+      
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.12);
+    } catch (e) {
+      console.warn("Audio Context beep failed", e);
+    }
+  };
+
+  const playBeep = () => {
+    if (beepMuted || beepVolume === 0) return;
+    playBeepSoundAt(beepVolume);
+  };
+
+  const selectProductForAudit = (item: InventoryItem, alertText?: string) => {
+    setSelectedAuditItem(item);
+    setAuditSearchQuery(item.name);
+    setAuditNewStock(item.stock);
+    setIsCameraScanning(false);
+    setIsStep1Collapsed(true); // Auto collapse Step 1
+    playBeep(); // Beep chime!
+    
+    if (alertText) {
+      triggerAlert(alertText, "success");
+    } else {
+      triggerAlert(`Loaded target: "${item.name}"`, "success");
+    }
+
+    // Smooth focus on step 2 stock input
+    setTimeout(() => {
+      const inputEl = document.getElementById("audit-new-stock-input");
+      if (inputEl) {
+        inputEl.focus();
+        (inputEl as HTMLInputElement).select();
+      }
+    }, 150);
+  };
 
   // Load state from localStorage on boot
   useEffect(() => {
@@ -259,6 +404,92 @@ export default function App() {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Camera scanning support for Audit Mode
+  useEffect(() => {
+    if (isCameraScanning) {
+      Html5Qrcode.getCameras().then(devices => {
+        if (devices && devices.length > 0) {
+          setCamerasList(devices);
+          // Prefer back/environment camera if available
+          const backCam = devices.find(device => 
+            device.label.toLowerCase().includes("back") || 
+            device.label.toLowerCase().includes("environment") ||
+            device.label.toLowerCase().includes("rear")
+          );
+          setSelectedCameraId(backCam ? backCam.id : devices[0].id);
+        } else {
+          triggerAlert("No camera devices found.", "info");
+          setIsCameraScanning(false);
+        }
+      }).catch(err => {
+        console.warn("Error getting cameras:", err);
+        triggerAlert("Camera permission denied or camera list inaccessible.", "info");
+        setIsCameraScanning(false);
+      });
+    } else {
+      setCamerasList([]);
+      setSelectedCameraId("");
+    }
+  }, [isCameraScanning]);
+
+  useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
+    if (isCameraScanning && selectedCameraId) {
+      const container = document.getElementById("audit-camera-scanner-view");
+      if (container) {
+        html5QrCode = new Html5Qrcode("audit-camera-scanner-view");
+        html5QrCode.start(
+          selectedCameraId,
+          { 
+            fps: 15, 
+            qrbox: (width, height) => {
+              // Create a nice landscape scanning rectangle banner
+              const w = Math.min(width * 0.8, 280);
+              const h = Math.min(height * 0.4, 130);
+              return { width: w, height: h };
+            }
+          },
+          (decodedText) => {
+            const cleanCode = decodedText.trim();
+            setAuditSearchQuery(cleanCode);
+            
+            const cleanQuery = cleanCode.toLowerCase();
+            const exactMatch = items.find(item => 
+              item.barcode === cleanQuery || 
+              item.articleCode.toLowerCase() === cleanQuery ||
+              item.barcode.replace(/\s+/g, "") === cleanQuery.replace(/\s+/g, "")
+            );
+
+            if (exactMatch) {
+              selectProductForAudit(exactMatch, `Barcode Matched: "${exactMatch.name}"`);
+            } else {
+              setIsCameraScanning(false);
+              setPrefilledBarcode(cleanCode);
+              setEditingItem(null);
+              setIsModalOpen(true);
+              triggerAlert(`Barcode "${cleanCode}" not in database. Opening enrollment form!`, "info");
+            }
+          },
+          () => {
+            // Quiet
+          }
+        ).catch(err => {
+          console.error("Failed to start Html5Qrcode:", err);
+        });
+      }
+    }
+
+    return () => {
+      if (html5QrCode) {
+        if (html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => {
+            html5QrCode?.clear();
+          }).catch(err => console.error("Error stopping scanner:", err));
+        }
+      }
+    };
+  }, [isCameraScanning, selectedCameraId, items]);
 
   // Trigger feedback banner helper
   const triggerAlert = (text: string, type: "success" | "info" = "success") => {
@@ -452,6 +683,7 @@ export default function App() {
     setAuditSearchQuery("");
     setAuditNewStock("");
     setAuditRemarks("Audited Stock Adjustments");
+    setIsStep1Collapsed(false);
   };
 
   // Scanner actions: Item was found
@@ -622,8 +854,8 @@ export default function App() {
   // Export entire inventory list to Landscape A4 PDF
   const handleExportLandscapePDF = async () => {
     try {
-      const totalPages = displayPages.length;
-      triggerAlert(`Compiling ${totalPages} Landscape A4 pages (12 items per page)...`, "info");
+      const totalPages = chunkedPages.length + 1;
+      triggerAlert(`Compiling ${totalPages} Landscape A4 pages (Summary Cover + ${chunkedPages.length} item list pages)...`, "info");
 
       // Create jsPDF in Landscape A4 mode
       const pdf = new jsPDF({
@@ -800,8 +1032,34 @@ export default function App() {
           </div>
 
           {/* Header Actions */}
-          <div className="flex items-center gap-2">
-            
+          <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 shrink-0">
+            {/* Shelf Audit Mode switch minimized to top nav bar */}
+            <div className="flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 h-9 transition-all text-xs font-bold shrink-0">
+              <span className={`text-[10px] font-mono tracking-tight ${isAuditMode ? "text-emerald-600 font-extrabold animate-pulse" : "text-zinc-500"}`}>
+                {isAuditMode ? "⚡ AUDIT ACTIVE" : "👁️ CATALOG VIEW"}
+              </span>
+              <button
+                id="header-toggle-audit-mode"
+                type="button"
+                onClick={() => {
+                  const newValue = !isAuditMode;
+                  setIsAuditMode(newValue);
+                  localStorage.setItem("8twelve_audit_mode", String(newValue));
+                  triggerAlert(newValue ? "Enabled linear Audit Mode dashboard." : "Returned to standard explorer dashboard.", "info");
+                }}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-250 ease-in-out focus:outline-none ${
+                  isAuditMode ? "bg-emerald-600" : "bg-zinc-300"
+                }`}
+                title="Toggle Shelf Stock Audit Mode"
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-250 ease-in-out ${
+                    isAuditMode ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
             {/* Download A4 Landscape PDF Button */}
             <button
               id="top-btn-print-all"
@@ -874,45 +1132,7 @@ export default function App() {
             </div>
           )}
 
-          {/* AUDIT MODE MASTER CONTROLLER SLIDER */}
-          <div className="bg-zinc-900 text-white rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm no-print">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-xl transition-all duration-300 ${isAuditMode ? "bg-emerald-550 text-zinc-950" : "bg-zinc-800 text-zinc-400"}`}>
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold tracking-tight">Active Shelf Audit & Stock Adjustment Mode</h2>
-                <p className="text-xs text-zinc-405">
-                  {isAuditMode 
-                   ? "Optimized linear workflow checklist: Scan/search, set stocks, track recent runs." 
-                   : "Standard Catalog View: Multi-shelf exploration, bulk uploads, aisles maps."}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] sm:text-xs font-mono font-bold whitespace-nowrap ${isAuditMode ? "text-emerald-400" : "text-zinc-400"}`}>
-                {isAuditMode ? "⚡ AUDIT ACTIVE" : "👁️ STANDARD VIEW"}
-              </span>
-              <button
-                id="btn-toggle-audit-mode"
-                onClick={() => {
-                  const newValue = !isAuditMode;
-                  setIsAuditMode(newValue);
-                  localStorage.setItem("8twelve_audit_mode", String(newValue));
-                  triggerAlert(newValue ? "Enabled linear Audit Mode dashboard." : "Returned to standard explorer dashboard.", "info");
-                }}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
-                  isAuditMode ? "bg-emerald-500" : "bg-zinc-700"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    isAuditMode ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
+
 
           {isAuditMode ? (
             /* AUDIT WORKSPACE STATION WITH STEPS */
@@ -921,58 +1141,236 @@ export default function App() {
               {/* LEFT COLUMN: THE LINEAR AUDIT STEPS (7 cols) */}
               <div className="lg:col-span-7 space-y-6">
                 <div className="bg-white border border-zinc-200 rounded-3xl p-6 shadow-sm space-y-6">
-                  <div className="border-b border-zinc-100 pb-4">
-                    <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center font-bold">1</span>
-                      Step 1: Scan or Search Product
-                    </h3>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      Perform active shelving lookup by entering name description, ID codes, barcode, or scanning.
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    {/* Lookup Input */}
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-zinc-400">
-                        <Search className="w-4 h-4" />
-                      </span>
-                      <input
-                        id="audit-lookup-search"
-                        type="text"
-                        placeholder="Type article code, title, or barcode..."
-                        value={auditSearchQuery}
-                        onChange={(e) => {
-                          setAuditSearchQuery(e.target.value);
-                          // Auto match exact check
-                          const cleanQuery = e.target.value.trim().toLowerCase();
-                          if (cleanQuery) {
-                            const exactMatch = items.find(item => 
-                              item.barcode === cleanQuery || 
-                              item.articleCode.toLowerCase() === cleanQuery
-                            );
-                            if (exactMatch) {
-                              setSelectedAuditItem(exactMatch);
-                              setAuditNewStock(exactMatch.stock);
-                              triggerAlert(`Matched exact product: "${exactMatch.name}"`, "success");
-                            }
-                          }
+                  {selectedAuditItem && isStep1Collapsed ? (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/40 p-4 rounded-2xl border border-emerald-100/60 animate-fade-in no-print">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[11px] flex items-center justify-center font-mono font-bold">✓</span>
+                          <span className="text-xs font-black uppercase tracking-wider text-emerald-800 font-sans">Step 1: Completed</span>
+                        </div>
+                        <h4 className="text-zinc-800 font-bold text-xs mt-1.5 truncate">
+                          Selected target: <strong className="text-zinc-900 font-extrabold">{selectedAuditItem.name}</strong>
+                        </h4>
+                        <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                          Code: #{selectedAuditItem.articleCode} &bull; Barcode: {selectedAuditItem.barcode}
+                        </p>
+                      </div>
+                      <button
+                        id="btn-expand-step1"
+                        type="button"
+                        onClick={() => {
+                          setIsStep1Collapsed(false);
                         }}
-                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl pl-10 pr-10 py-2.5 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
-                      />
-                      {auditSearchQuery && (
-                        <button
-                          onClick={() => {
-                            setAuditSearchQuery("");
-                            setSelectedAuditItem(null);
-                            setAuditNewStock("");
-                          }}
-                          className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-zinc-400 hover:text-zinc-650"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                        className="px-3.5 py-1.5 bg-white hover:bg-emerald-50 border border-zinc-250 hover:border-emerald-300 rounded-xl text-xs font-bold text-emerald-850 shrink-0 shadow-xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        Change / Search again
+                      </button>
                     </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 pb-4">
+                        <div>
+                          <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider flex items-center gap-2 font-sans">
+                            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center font-bold">1</span>
+                            Step 1: Scan or Search Product
+                          </h3>
+                          <p className="text-xs text-zinc-500 mt-1 font-sans">
+                            Perform active shelving lookup by entering name description, ID codes, barcode, or scanning.
+                          </p>
+                        </div>
+
+                        {/* Sound Settings Control UI */}
+                        <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 py-1.5 shrink-0 self-start sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newMuted = !beepMuted;
+                              setBeepMuted(newMuted);
+                              localStorage.setItem("8twelve_beep_muted", String(newMuted));
+                              if (!newMuted) {
+                                setTimeout(() => playBeepSoundAt(beepVolume), 50);
+                              }
+                            }}
+                            className="text-zinc-650 hover:text-emerald-650 p-1 bg-white hover:bg-zinc-100 border border-zinc-200/50 rounded-lg transition"
+                            title={beepMuted ? "Unmute scanner beep" : "Mute scanner beep"}
+                          >
+                            {beepMuted || beepVolume === 0 ? (
+                              <VolumeX className="w-4 h-4 text-rose-500 shrink-0" />
+                            ) : (
+                              <Volume2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            )}
+                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold text-zinc-400">Vol:</span>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={beepVolume}
+                              onChange={(e) => {
+                                const vol = Number(e.target.value);
+                                setBeepVolume(vol);
+                                localStorage.setItem("8twelve_beep_volume", String(vol));
+                              }}
+                              onMouseUp={() => playBeepSoundAt(beepVolume)}
+                              onTouchEnd={() => playBeepSoundAt(beepVolume)}
+                              className="w-16 h-1 bg-zinc-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none"
+                            />
+                            <span className="text-[10px] font-mono font-bold text-zinc-500 w-[24px] text-right">
+                              {beepMuted ? "Off" : `${beepVolume}%`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                    {/* Lookup Input and Camera Trigger Row */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="relative flex-1">
+                        <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-zinc-400">
+                          <Search className="w-4 h-4" />
+                        </span>
+                        <input
+                          id="audit-lookup-search"
+                          type="text"
+                          placeholder="Type article code, title, or barcode..."
+                          value={auditSearchQuery}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              const trimmedVal = auditSearchQuery.trim();
+                              if (!trimmedVal) return;
+                              const cleanQuery = trimmedVal.toLowerCase();
+                              const exactMatch = items.find(item => 
+                                item.barcode === cleanQuery || 
+                                item.articleCode.toLowerCase() === cleanQuery ||
+                                item.name.toLowerCase() === cleanQuery
+                              );
+                              if (exactMatch) {
+                                selectProductForAudit(exactMatch, `Matched exact product: "${exactMatch.name}"`);
+                              } else {
+                                setPrefilledBarcode(trimmedVal);
+                                setEditingItem(null);
+                                setIsModalOpen(true);
+                                triggerAlert(`"${trimmedVal}" not in database. Opening enrollment form!`, "info");
+                              }
+                            }
+                          }}
+                          onChange={(e) => {
+                            setAuditSearchQuery(e.target.value);
+                            // Auto match exact check
+                            const cleanQuery = e.target.value.trim().toLowerCase();
+                            if (cleanQuery) {
+                              const exactMatch = items.find(item => 
+                                item.barcode === cleanQuery || 
+                                item.articleCode.toLowerCase() === cleanQuery
+                              );
+                              if (exactMatch) {
+                                selectProductForAudit(exactMatch, `Matched exact product: "${exactMatch.name}"`);
+                              }
+                            }
+                          }}
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-xl pl-10 pr-10 py-2.5 text-xs text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-sans"
+                        />
+                        {auditSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearchQuery("");
+                              setSelectedAuditItem(null);
+                              setAuditNewStock("");
+                            }}
+                            className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-zinc-400 hover:text-zinc-650"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsCameraScanning(!isCameraScanning)}
+                        className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shrink-0 ${
+                          isCameraScanning
+                            ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 shadow-sm"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 shadow-sm"
+                        }`}
+                        title="Scan barcode with camera"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>{isCameraScanning ? "Stop Camera" : "Scan with Camera"}</span>
+                      </button>
+                    </div>
+
+                    {/* Active Camera Viewfinder Overlay */}
+                    {isCameraScanning && (
+                      <div className="bg-zinc-950 rounded-2xl p-4 border border-zinc-800 relative shadow-inner overflow-hidden text-zinc-300">
+                        <div className="flex justify-between items-center mb-3">
+                          <div className="flex items-center gap-1.5 animate-pulse">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Live Camera Scanner</span>
+                          </div>
+                          
+                          {/* Camera Selection Controls */}
+                          {camerasList.length > 1 && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] text-zinc-500">Camera:</span>
+                              <select
+                                value={selectedCameraId}
+                                onChange={(e) => setSelectedCameraId(e.target.value)}
+                                className="bg-zinc-900 border border-zinc-700 text-[10px] text-zinc-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-medium"
+                              >
+                                {camerasList.map((cam, idx) => (
+                                  <option key={cam.id} value={cam.id}>
+                                    {cam.label || `Camera ${idx + 1}`}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Camera viewport container */}
+                        <div className="relative bg-black rounded-xl overflow-hidden border border-zinc-900 aspect-video max-w-sm mx-auto">
+                          {/* Standard HTML5 Viewfinder Viewport */}
+                          <div id="audit-camera-scanner-view" className="w-full h-full object-cover"></div>
+
+                          {/* Beautiful Scanning Overlay HUD with Laser Line */}
+                          <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
+                            {/* HUD brackets corners */}
+                            <div className="flex justify-between">
+                              <div className="w-4 h-4 border-t-2 border-l-2 border-emerald-500 rounded-tl" />
+                              <div className="w-4 h-4 border-t-2 border-r-2 border-emerald-500 rounded-tr" />
+                            </div>
+                            
+                            {/* Center targeting guideline rectangle / red alignment laser */}
+                            <div className="relative self-center w-[90%] h-[60%] border border-dashed border-emerald-500/35 rounded-lg flex items-center justify-center">
+                              <div className="absolute inset-x-0 h-0.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] opacity-85 scanner-laser" />
+                              <span className="text-[9px] text-emerald-400 font-bold bg-black/75 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                Hold Barcode Here
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <div className="w-4 h-4 border-b-2 border-l-2 border-emerald-500 rounded-bl" />
+                              <div className="w-4 h-4 border-b-2 border-r-2 border-emerald-500 rounded-br" />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-center mt-3">
+                          <p className="text-[10px] text-zinc-500">
+                            Hold barcode steadily inside the highlighted frame. Will match automatically.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setIsCameraScanning(false)}
+                            className="mt-2 text-[10px] text-zinc-400 hover:text-white underline font-medium"
+                          >
+                            Cancel and close camera
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Autocomplete Results */}
                     {matchedAuditItems.length > 0 && !selectedAuditItem && (
@@ -981,10 +1379,7 @@ export default function App() {
                           <button
                             key={item.id}
                             onClick={() => {
-                              setSelectedAuditItem(item);
-                              setAuditSearchQuery(item.name);
-                              setAuditNewStock(item.stock);
-                              triggerAlert(`Loaded active audit target: "${item.name}"`, "info");
+                              selectProductForAudit(item, `Loaded active audit target: "${item.name}"`);
                             }}
                             className="w-full text-left px-4 py-2.5 hover:bg-emerald-50/45 transition-colors flex items-center justify-between gap-3 text-xs"
                           >
@@ -1015,9 +1410,7 @@ export default function App() {
                             <button
                               key={itm.id}
                               onClick={() => {
-                                setSelectedAuditItem(itm);
-                                setAuditSearchQuery(itm.name);
-                                setAuditNewStock(itm.stock);
+                                selectProductForAudit(itm, `Loaded active audit target: "${itm.name}"`);
                               }}
                               className="px-2 py-1 bg-white border border-zinc-250 hover:border-emerald-500 rounded-lg text-[10px] text-zinc-650 hover:text-emerald-700 transition-all font-mono"
                             >
@@ -1028,6 +1421,8 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  </>
+                  )}
                 </div>
 
                 {/* STEP 2 PANEL */}
@@ -1171,6 +1566,7 @@ export default function App() {
                             setSelectedAuditItem(null);
                             setAuditSearchQuery("");
                             setAuditNewStock("");
+                            setIsStep1Collapsed(false);
                           }}
                           className="px-4 py-2 border border-zinc-200 rounded-xl text-xs hover:bg-zinc-50 font-semibold text-zinc-650 shrink-0"
                         >
@@ -1253,11 +1649,8 @@ export default function App() {
                               <button
                                 id={`btn-edit-recent-${auditedItem.articleCode}`}
                                 onClick={() => {
-                                  setSelectedAuditItem(auditedItem);
-                                  setAuditNewStock(auditedItem.stock);
+                                  selectProductForAudit(auditedItem, `Edit recent item "${auditedItem.name}"`);
                                   setAuditRemarks("Adjusted recent audit stock parameter");
-                                  setAuditSearchQuery(auditedItem.name);
-                                  triggerAlert(`Edit recent item "${auditedItem.name}"`, "info");
                                 }}
                                 className="p-1.5 bg-white border border-zinc-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 rounded-lg text-zinc-500 transition-colors flex items-center gap-1 font-bold text-[9px]"
                                 title="Edit again"
@@ -1543,90 +1936,153 @@ export default function App() {
 
         {/* PRINT ONLY: COMPLETE STOCK SHEET WITH LAST UPDATED DETAILS */}
         <div className="hidden print:block print-only print-container bg-white text-zinc-950 p-6 font-sans">
-          {displayPages.map((pageItems, pageIdx) => (
-            <div key={pageIdx} className="printable-page-block border-b border-zinc-200 pb-8 mb-8 print:break-after-page" style={{ pageBreakAfter: 'always', breakAfter: 'page' }}>
-              <div className="border-b-2 border-zinc-900 pb-4 mb-6">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h1 className="text-2xl font-black tracking-tight text-zinc-900 uppercase">
-                      8Twelve Store - Master Stock Inventory Sheet
-                    </h1>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      Comprehensive audit ledger record containing item codes, barcodes, stocks level, and last updated event details.
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs bg-zinc-100 text-zinc-805 px-2.5 py-1 rounded font-mono font-bold tracking-wider inline-block">
-                      PAGE {pageIdx + 1} OF {displayPages.length}
-                    </span>
-                    <p className="text-xs font-mono font-bold text-zinc-700 mt-1.5">{localTime}</p>
-                  </div>
-                </div>
+          {/* COVER PAGE (PAGE 1): DEDICATED SUMMARY COVER SHEET */}
+          <div className="printable-page-block border-b border-zinc-200 pb-8 mb-8 print:break-after-page min-h-[195mm] flex flex-col justify-between" style={{ pageBreakAfter: 'always', breakAfter: 'page' }}>
+            <div>
+              <div className="border-b-4 border-zinc-900 pb-6 mb-8 mt-4 text-center">
+                <h1 className="text-3xl font-black tracking-tight text-zinc-900 uppercase">
+                  8Twelve Store - Master Inventory Stock Report
+                </h1>
+                <p className="text-xs text-zinc-500 mt-2 font-mono uppercase tracking-widest">
+                  Automated Shelf Audit Ledger Summary
+                </p>
+              </div>
 
-                <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-zinc-200">
-                  <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-150">
+              <div className="my-10 space-y-6">
+                <p className="text-sm text-zinc-700 leading-relaxed max-w-2xl mx-auto text-center">
+                  This verification document is compiled automatically based on real-time mobile shelf-front inventory scanning and auditing workflows. Use this document as the official store ledger.
+                </p>
+
+                {/* Grid of Key Summary Statistics */}
+                <div className="grid grid-cols-2 gap-4 max-w-3xl mx-auto mt-8">
+                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
                     <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Total Product Listings</span>
-                    <span className="text-xl font-bold font-mono text-zinc-900">{items.length} skus</span>
+                    <span className="text-3xl font-black font-mono text-zinc-900 mt-1 block">{items.length} sku types</span>
                   </div>
-                  <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-150">
+                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
                     <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Accumulated Gross Stock Counter</span>
-                    <span className="text-xl font-bold font-mono text-zinc-900 text-emerald-800">
+                    <span className="text-3xl font-black font-mono text-emerald-800 mt-1 block">
                       {items.reduce((sum, i) => sum + i.stock, 0)} units
                     </span>
                   </div>
-                  <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-150">
-                    <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Aisles coordinates and areas</span>
-                    <span className="text-xl font-bold font-mono text-zinc-900">
+                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                    <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Active Storage Zones</span>
+                    <span className="text-3xl font-black font-mono text-zinc-900 mt-1 block">
                       {new Set(items.map(i => i.location)).size} Shelves Zones
                     </span>
                   </div>
+                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                    <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Inspected SKUs Ratio</span>
+                    <span className="text-3xl font-black font-mono text-orange-750 mt-1 block">
+                      {items.filter(i => i.lastUpdatedTime).length} of {items.length} Checked
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status Alert Summary */}
+                <div className="max-w-3xl mx-auto bg-zinc-50 border border-zinc-200 rounded-xl p-4 grid grid-cols-2 gap-4 text-xs font-mono">
+                  <div>
+                    <span className="text-rose-600 font-extrabold">&bull; OUT OF STOCK LIMITS: </span>
+                    <span className="font-bold text-zinc-900">{items.filter(i => i.stock === 0).length} skus</span>
+                  </div>
+                  <div>
+                    <span className="text-amber-600 font-extrabold">&bull; LOW BALANCE CRITICAL: </span>
+                    <span className="font-bold text-zinc-900">{items.filter(i => i.stock > 0 && i.stock <= 10).length} skus</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              {/* Operator and Signatures details */}
+              <div className="mt-20 border-t border-zinc-300 pt-8 max-w-3xl mx-auto grid grid-cols-2 gap-8 text-xs">
+                <div className="space-y-3.5">
+                  <p className="text-zinc-500 font-mono">
+                    Report Compiled On: <strong className="text-zinc-800 font-bold">{localTime}</strong>
+                  </p>
+                  <p className="text-zinc-500 font-mono">
+                    Principal Operator: <strong className="text-zinc-800 font-bold">{userEmail || "docshabplt@gmail.com"}</strong>
+                  </p>
+                </div>
+                <div className="space-y-6 pt-2">
+                  <p className="font-mono border-b border-zinc-400 pb-1 text-zinc-500">
+                    Checked & Approved By: ___________________________
+                  </p>
+                  <p className="font-mono border-b border-zinc-400 pb-1 text-zinc-500">
+                    Store Stamp / Verification Date: _________________
+                  </p>
                 </div>
               </div>
 
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b-2 border-zinc-300 text-zinc-700 font-extrabold uppercase text-[10px] tracking-wider">
-                    <th className="py-2.5 pr-2">Code</th>
-                    <th className="py-2.5">Product Identification</th>
-                    <th className="py-2.5">Barcode No</th>
-                    <th className="py-2.5">Shelf Location</th>
-                    <th className="py-2.5">Aisle Category</th>
-                    <th className="py-2.5 text-right font-black">Stock In Hand</th>
-                    <th className="py-2.5 pl-4 text-center">Last Update Timestamp</th>
-                    <th className="py-2.5 text-right">Last Audit Level</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-200">
-                  {pageItems.map((i) => (
-                    <tr key={i.id} className="hover:bg-zinc-50/50">
-                      <td className="py-3 font-mono font-bold text-zinc-800">#{i.articleCode}</td>
-                      <td className="py-3 pr-2">
-                        <p className="font-bold text-zinc-900 text-sm leading-tight">{i.name}</p>
-                        {i.remark && <p className="text-[10px] text-zinc-405 italic mt-0.5">{i.remark}</p>}
-                      </td>
-                      <td className="py-3">
-                        <BarcodeVisual value={i.barcode} />
-                      </td>
-                      <td className="py-3 text-zinc-600 font-mono text-[11px]">{i.location}</td>
-                      <td className="py-3 text-zinc-600">{i.category}</td>
-                      <td className="py-3 text-right font-mono font-black text-sm">{i.stock}</td>
-                      <td className="py-3 pl-4 text-center text-zinc-500 font-mono text-[10px]">
-                        {i.lastUpdatedTime 
-                          ? new Date(i.lastUpdatedTime).toLocaleString() 
-                          : "— (No session audit)"
-                        }
-                      </td>
-                      <td className="py-3 text-right font-mono font-bold text-zinc-650">
-                        {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Print Cover Footer */}
+              <div className="mt-24 text-[10px] text-zinc-400 text-center font-mono">
+                8Twelve Convenience Store &bull; Mobile Shelf Audit Suite v2.0
+              </div>
+            </div>
+          </div>
 
-              <div className="mt-12 border-t-2 border-zinc-200 pt-6 text-[10px] text-zinc-400 flex justify-between items-center">
-                <p>8Twelve Stores &bull; Automated Digital Shelf Audit &copy; {new Date().getFullYear()}</p>
-                <p className="font-mono">Checked and Verified by: ________________________</p>
+          {/* ITEM DETAIL PAGES (PAGE 2+) */}
+          {chunkedPages.map((pageItems, pageIdx) => (
+            <div key={pageIdx} className="printable-page-block border-b border-zinc-200 pb-8 mb-8 print:break-after-page min-h-[195mm] flex flex-col justify-between" style={{ pageBreakAfter: 'always', breakAfter: 'page' }}>
+              <div>
+                <div className="border-b-2 border-zinc-900 pb-2.5 mb-5 flex justify-between items-center text-xs">
+                  <div>
+                    <h2 className="text-sm font-extrabold text-zinc-900 uppercase tracking-tight">
+                      8Twelve Inventory List &bull; Stock Details
+                    </h2>
+                  </div>
+                  <div className="text-right font-mono text-[10px]">
+                    <span className="bg-zinc-100 text-zinc-700 px-2 py-0.5 rounded font-bold">
+                      PAGE {pageIdx + 2} OF {chunkedPages.length + 1}
+                    </span>
+                  </div>
+                </div>
+
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="border-b border-zinc-400 text-zinc-800 font-extrabold uppercase text-[9px] tracking-wider">
+                      <th className="py-2 pr-2">Code</th>
+                      <th className="py-2">Product Description</th>
+                      <th className="py-2">Barcode</th>
+                      <th className="py-2">Shelf Code</th>
+                      <th className="py-2">Category</th>
+                      <th className="py-2 text-right">Stock</th>
+                      <th className="py-2 pl-4 text-center">Last Updated</th>
+                      <th className="py-2 text-right">Audit level</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-150">
+                    {pageItems.map((i) => (
+                      <tr key={i.id} className="hover:bg-zinc-50/50">
+                        <td className="py-2 font-mono font-bold text-zinc-750">#{i.articleCode}</td>
+                        <td className="py-2 pr-2">
+                          <p className="font-bold text-zinc-900">{i.name}</p>
+                          {i.remark && <p className="text-[9px] text-zinc-400 italic font-sans leading-none mt-0.5">{i.remark}</p>}
+                        </td>
+                        <td className="py-2 shrink-0">
+                          <BarcodeVisual value={i.barcode} />
+                        </td>
+                        <td className="py-2 text-zinc-600 font-mono text-[10px]">{i.location}</td>
+                        <td className="py-2 text-zinc-650">{i.category}</td>
+                        <td className="py-2 text-right font-mono font-black text-xs">{i.stock}</td>
+                        <td className="py-2 pl-4 text-center text-zinc-500 font-mono text-[9px]">
+                          {i.lastUpdatedTime 
+                            ? new Date(i.lastUpdatedTime).toLocaleString() 
+                            : "—"
+                          }
+                        </td>
+                        <td className="py-2 text-right font-mono text-zinc-600">
+                          {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-8 border-t border-zinc-200 pt-4 text-[9px] text-zinc-400 flex justify-between items-center no-print-child">
+                <p>8Twelve Stores &bull; Master Inventory Sheet Ledger &copy; {new Date().getFullYear()}</p>
+                <p className="font-mono">Checked: ________________________</p>
               </div>
             </div>
           ))}
@@ -1757,100 +2213,163 @@ export default function App() {
 
             {/* Scrollable Printable Paper Sheet Container */}
             <div className="p-6 md:p-8 overflow-y-auto bg-zinc-100 flex-1 space-y-8 max-h-[70vh]">
-              {displayPages.map((pageItems, index) => (
-                <div 
-                  key={index}
-                  id={`printable-page-block-${index}`} 
-                  className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6 max-w-4xl mx-auto font-sans text-zinc-800"
-                >
-                  <div className="border-b-2 border-zinc-900 pb-4 mb-6">
-                    <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
-                      <div>
-                        <h4 className="text-xl font-extrabold tracking-tight text-zinc-900 uppercase">
-                          8Twelve Convenience Store &bull; Inventory Sheet
-                        </h4>
-                        <p className="text-xs text-zinc-405 mt-1">
-                          Active Stock Balance Audit Ledger (Barcodes & Updated Time logs)
-                        </p>
-                      </div>
-                      <div className="text-left sm:text-right font-mono text-xs">
-                        <span className="bg-emerald-50 text-emerald-800 font-bold text-[10px] tracking-wide px-2 py-0.5 rounded uppercase">
-                          PAGE {index + 1} OF {displayPages.length}
-                        </span>
-                        <p className="text-zinc-650 mt-1 font-bold">Time: {localTime}</p>
-                      </div>
-                    </div>
+              {/* DEDICATED FIRST PAGE (PAGE 1): STOCK INVENTORY SUMMARY COVER */}
+              <div 
+                id="printable-page-block-0" 
+                className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-8 max-w-4xl mx-auto font-sans text-zinc-800 min-h-[580px] flex flex-col justify-between"
+              >
+                <div>
+                  <div className="border-b-4 border-zinc-900 pb-5 mb-6 text-center">
+                    <h4 className="text-2xl font-black tracking-tight text-zinc-900 uppercase">
+                      8Twelve store - stock inventory & Audit report
+                    </h4>
+                    <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest mt-1">
+                      System Verified Ledger Cover Summary Sheet
+                    </p>
+                  </div>
 
-                    <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-zinc-200">
-                      <div className="bg-zinc-50 p-2.5 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] text-zinc-400 block uppercase font-bold">Total Products Checked</span>
-                        <span className="text-base font-bold font-mono text-zinc-900">{items.length} positions</span>
+                  <div className="py-6 space-y-6">
+                    <p className="text-xs text-zinc-600 leading-relaxed max-w-xl mx-auto text-center font-sans">
+                      This verification document is compiled automatically based on real-time mobile shelf-front inventory scanning and auditing workflows. Use this document as the official store ledger.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4 max-w-2xl mx-auto mt-6">
+                      <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Total Product Listings</span>
+                        <span className="text-2xl font-bold font-mono text-zinc-900 block mt-0.5">{items.length} sku positions</span>
                       </div>
-                      <div className="bg-zinc-50 p-2.5 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] text-zinc-400 block uppercase font-bold">Total Units Counted</span>
-                        <span className="text-base font-bold font-mono text-emerald-700">
+                      <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Accumulated Gross Stock Counter</span>
+                        <span className="text-2xl font-bold font-mono text-emerald-800 block mt-0.5">
                           {items.reduce((sum, item) => sum + item.stock, 0)} units
                         </span>
                       </div>
-                      <div className="bg-zinc-50 p-2.5 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] text-zinc-400 block uppercase font-bold">Store Locations Map</span>
-                        <span className="text-base font-bold font-mono text-zinc-900">
+                      <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Active Storage Zones</span>
+                        <span className="text-2xl font-bold font-mono text-zinc-900 block mt-0.5">
                           {new Set(items.map(item => item.location)).size} Zones
                         </span>
                       </div>
+                      <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-center">
+                        <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Inspected SKUs Ratio</span>
+                        <span className="text-2xl font-bold font-mono text-indigo-700 block mt-0.5">
+                          {items.filter(i => i.lastUpdatedTime).length} of {items.length} Checked
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Warning balance alerts container */}
+                    <div className="max-w-2xl mx-auto bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 grid grid-cols-2 gap-3 text-[11px] font-mono text-center">
+                      <div>
+                        <span className="text-rose-600 font-bold">&bull; OUT OF STOCK: </span>
+                        <span className="font-extrabold text-zinc-900">{items.filter(i => i.stock === 0).length} skus</span>
+                      </div>
+                      <div>
+                        <span className="text-amber-600 font-bold">&bull; LOW STOCK WARNING: </span>
+                        <span className="font-extrabold text-zinc-900">{items.filter(i => i.stock > 0 && i.stock <= 10).length} skus</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  {/* Operator Sign-off & signature margins */}
+                  <div className="mt-12 border-t border-zinc-200 pt-6 max-w-2xl mx-auto grid grid-cols-2 gap-6 text-xs text-zinc-600">
+                    <div className="space-y-3">
+                      <p className="font-mono">
+                        Report Time: <strong className="text-zinc-800">{localTime}</strong>
+                      </p>
+                      <p className="font-mono">
+                        Principal Operator: <strong className="text-zinc-800">{userEmail || "docshabplt@gmail.com"}</strong>
+                      </p>
+                    </div>
+                    <div className="space-y-5">
+                      <p className="font-mono border-b border-zinc-350 pb-0.5">Verified By: ___________________________</p>
+                      <p className="font-mono border-b border-zinc-350 pb-0.5">Signature Date: _________________</p>
                     </div>
                   </div>
 
-                  {/* Main scrollable table page */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-zinc-350 text-zinc-500 font-bold uppercase text-[9px] tracking-wider">
-                          <th className="py-2 pr-2">Code</th>
-                          <th className="py-2">Product Name</th>
-                          <th className="py-2">Barcode</th>
-                          <th className="py-2">Zone</th>
-                          <th className="py-2 text-right">Physical Stock</th>
-                          <th className="py-2 pl-4 text-center">Last Updated On</th>
-                          <th className="py-2 text-right">Last Audit Count</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-150">
-                        {pageItems.map((i) => (
-                          <tr key={i.id} className="hover:bg-zinc-50">
-                            <td className="py-2.5 font-mono font-bold text-zinc-650">#{i.articleCode}</td>
-                            <td className="py-2.5 font-semibold text-zinc-900 pr-2">{i.name}</td>
-                            <td className="py-2.5">
-                              <BarcodeVisual value={i.barcode} />
-                            </td>
-                            <td className="py-2.5 text-zinc-650 text-[11px] font-mono">{i.location}</td>
-                            <td className="py-2.5 text-right font-mono font-black text-xs text-zinc-850">
-                              <span className={`px-1.5 py-0.5 rounded ${i.stock <= 10 ? "bg-amber-100 text-amber-900 font-bold" : ""}`}>
-                                {i.stock}
-                              </span>
-                            </td>
-                            <td className="py-2.5 pl-4 text-center text-zinc-500 font-mono text-[10px]">
-                              {i.lastUpdatedTime 
-                                ? new Date(i.lastUpdatedTime).toLocaleString() 
-                                : "—"
-                              }
-                            </td>
-                            <td className="py-2.5 text-right font-mono text-zinc-450">
-                              {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Verified block details */}
-                  <div className="mt-8 pt-4 border-t border-zinc-200 text-[10px] text-zinc-400 flex flex-col sm:flex-row justify-between items-center gap-2">
-                    <p>8Twelve Stores &bull; Master Inventory Sheet &bull; Generates custom sheets automatically on audit actions.</p>
-                    <p className="font-mono font-bold text-zinc-650">Verify operator: ____________________</p>
+                  <div className="text-center text-[10px] text-zinc-400 pt-10 font-mono">
+                    Page 1 of {chunkedPages.length + 1} &bull; 8Twelve Convenience Store &copy; {new Date().getFullYear()}
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {/* DEDICATED SUBSEQUENT PAGES: CLEAN COHESIVE TABULAR SHEETS (PAGES 2+) */}
+              {chunkedPages.map((pageItems, pageIdx) => {
+                const globalIndex = pageIdx + 1; // Page 2, 3, etc.
+                return (
+                  <div 
+                    key={pageIdx}
+                    id={`printable-page-block-${globalIndex}`} 
+                    className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6 max-w-4xl mx-auto font-sans text-zinc-800 min-h-[580px] flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="border-b-2 border-zinc-900 pb-2.5 mb-5 flex justify-between items-center text-xs">
+                        <div>
+                          <h4 className="text-sm font-extrabold text-zinc-900 uppercase tracking-tight">
+                            8Twelve Inventory Detail Listing
+                          </h4>
+                        </div>
+                        <div className="text-right font-mono text-[10px]">
+                          <span className="bg-zinc-100 text-zinc-700 px-2 py-0.5 rounded font-bold uppercase">
+                            PAGE {globalIndex + 1} OF {chunkedPages.length + 1}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Main scrollable table page */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="border-b border-zinc-350 text-zinc-500 font-bold uppercase text-[9px] tracking-wider">
+                              <th className="py-2 pr-2">Code</th>
+                              <th className="py-2">Product Name</th>
+                              <th className="py-2">Barcode</th>
+                              <th className="py-2">Zone</th>
+                              <th className="py-2 text-right">Physical Stock</th>
+                              <th className="py-2 pl-4 text-center">Last Updated On</th>
+                              <th className="py-2 text-right">Last Audit Count</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-150">
+                            {pageItems.map((i) => (
+                              <tr key={i.id} className="hover:bg-zinc-50">
+                                <td className="py-2.5 font-mono font-bold text-zinc-650">#{i.articleCode}</td>
+                                <td className="py-2.5 font-semibold text-zinc-900 pr-2">{i.name}</td>
+                                <td className="py-2.5">
+                                  <BarcodeVisual value={i.barcode} />
+                                </td>
+                                <td className="py-2.5 text-zinc-650 text-[11px] font-mono">{i.location}</td>
+                                <td className="py-2.5 text-right font-mono font-black text-xs text-zinc-850 font-sans">
+                                  <span className={`px-1.5 py-0.5 rounded ${i.stock <= 10 ? "bg-amber-100 text-amber-900 font-bold" : ""}`}>
+                                    {i.stock}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 pl-4 text-center text-zinc-500 font-mono text-[10px]">
+                                  {i.lastUpdatedTime 
+                                    ? new Date(i.lastUpdatedTime).toLocaleString() 
+                                    : "—"
+                                  }
+                                </td>
+                                <td className="py-2.5 text-right font-mono text-zinc-450">
+                                  {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Verified block details */}
+                    <div className="mt-8 pt-4 border-t border-zinc-200 text-[10px] text-zinc-400 flex flex-col sm:flex-row justify-between items-center gap-2">
+                      <p>8Twelve Stores &bull; Master Inventory Sheet &bull; Verification record checks.</p>
+                      <p className="font-mono font-bold text-zinc-650">Verify operator checklist review: ____________________</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
