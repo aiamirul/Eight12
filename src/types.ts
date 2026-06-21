@@ -14,6 +14,8 @@ export interface InventoryItem {
   category: string;
   stock: number;
   imageUrl?: string;
+  lastUpdatedTime?: string; // ISO or human string of last update
+  lastUpdatedStock?: number; // Stock number before or at last update
 }
 
 export interface StockChangeLog {

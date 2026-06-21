@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Libre+Barcode+39&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -6,12 +6,19 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* Custom barcode font utility */
+.font-barcode {
+  font-family: 'Libre Barcode 39', cursive !important;
+  font-size: 40px !important;
+  line-height: 1 !important;
+}
+
 /* Print Styles for Log PDF Reports */
 @media print {
   body {
     background: white !important;
     color: black !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
   }
   .no-print {
     display: none !important;

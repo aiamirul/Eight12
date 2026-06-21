@@ -117,12 +117,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         {/* Aliases List */}
         {item.aliases && item.aliases.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-1 items-center">
-            <Tag className="w-3 h-3 text-zinc-450 shrink-0" />
+            <Tag className="w-3 h-3 text-zinc-400 shrink-0" />
             {item.aliases.map((alias, i) => (
               <span key={i} className="text-[9px] bg-zinc-150 border border-zinc-250 text-zinc-700 px-1.5 py-0.5 rounded font-bold">
                 {alias}
               </span>
             ))}
+          </div>
+        )}
+
+        {/* Last updated metadata indicator */}
+        {item.lastUpdatedTime && (
+          <div className="mt-2.5 flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono border-t border-zinc-50 pt-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+            <span>Audit: {new Date(item.lastUpdatedTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ({item.lastUpdatedStock} qty)</span>
           </div>
         )}
       </div>
