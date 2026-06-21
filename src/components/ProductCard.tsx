@@ -5,13 +5,14 @@
 
 import React, { useState } from "react";
 import { InventoryItem } from "../types";
-import { Edit, Trash, Plus, Minus, CheckCircle, Tag, MapPin, Archive } from "lucide-react";
+import { Edit, Trash, Plus, Minus, CheckCircle, Tag, MapPin, Archive, EyeOff } from "lucide-react";
 
 interface ProductCardProps {
   item: InventoryItem;
   onEdit: (item: InventoryItem) => void;
   onDelete: (id: string) => void;
   onQuickStockUpdate: (item: InventoryItem, newStock: number, remarks: string) => void;
+  onToggleInactive?: (id: string, name: string) => void;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -19,6 +20,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onEdit,
   onDelete,
   onQuickStockUpdate,
+  onToggleInactive,
 }) => {
   const [quickStock, setQuickStock] = useState<number>(item.stock);
   const [quickRemarks, setQuickRemarks] = useState("");
@@ -197,6 +199,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           Current State: <strong className="text-zinc-800 font-bold">{item.stock} in store</strong>
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
+          {onToggleInactive && (
+            <button
+              id={`btn-ignore-card-${item.articleCode}`}
+              onClick={() => onToggleInactive(item.id, item.name)}
+              className="p-1 rounded text-zinc-500 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+              title="Ignore product (excludes from Continuous Shelf Verification)"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             id={`btn-edit-card-${item.articleCode}`}
             onClick={() => onEdit(item)}

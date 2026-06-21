@@ -16,6 +16,7 @@ export interface InventoryItem {
   imageUrl?: string;
   lastUpdatedTime?: string; // ISO or human string of last update
   lastUpdatedStock?: number; // Stock number before or at last update
+  inactive?: boolean; // Set true if item is ignored/inactive
 }
 
 export interface StockChangeLog {

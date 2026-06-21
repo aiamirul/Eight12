@@ -32,6 +32,9 @@ import {
   RotateCcw,
   Edit2,
   X,
+  Menu,
+  Eye,
+  EyeOff,
   History,
   Printer,
   Copy,
@@ -249,6 +252,18 @@ export default function App() {
   // Drag and drop CSV upload
   const [csvDragActive, setCsvDragActive] = useState(false);
 
+  // Mobile navigation expansion state
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Threshold controls visibility state
+  const [isThresholdMenuOpen, setIsThresholdMenuOpen] = useState(false);
+
+  // Show next 5 pending audit items inline state
+  const [showNext5, setShowNext5] = useState(false);
+
+  // Show full inactive/ignored items dialog state
+  const [showInactiveModal, setShowInactiveModal] = useState(false);
+
   // Audit Mode states
   const [isAuditMode, setIsAuditMode] = useState<boolean>(() => {
     return localStorage.getItem("8twelve_audit_mode") === "true";
@@ -267,6 +282,18 @@ export default function App() {
 
   // Step 1 collapse level
   const [isStep1Collapsed, setIsStep1Collapsed] = useState(false);
+
+  // Audit hours threshold window state (24-240 hrs)
+  const [auditHoursWindow, setAuditHoursWindow] = useState<number>(() => {
+    const saved = localStorage.getItem("8twelve_audit_hours_window");
+    return saved ? Math.min(240, Math.max(24, parseInt(saved, 10))) : 48;
+  });
+
+  const handleAuditHoursChange = (val: number) => {
+    const newVal = Math.min(240, Math.max(24, val));
+    setAuditHoursWindow(newVal);
+    localStorage.setItem("8twelve_audit_hours_window", String(newVal));
+  };
 
   // Beep sound volume and mute settings
   const [beepVolume, setBeepVolume] = useState<number>(() => {
@@ -605,6 +632,29 @@ export default function App() {
     triggerAlert(`Deregistered "${itemToDelete.name}" from active catalog`, "info");
   };
 
+  // Toggle inactive status (ignore item)
+  const handleToggleInactive = (id: string, name: string) => {
+    const updatedList = items.map(curr => {
+      if (curr.id === id) {
+        const nextState = !curr.inactive;
+        // Trigger alert depending on high-level activity
+        triggerAlert(
+          nextState 
+            ? `"${name}" is now ignored. It won't count toward Continuous Shelf Verification.` 
+            : `"${name}" re-activated on main shelf inventory!`,
+          "info"
+        );
+        return {
+          ...curr,
+          inactive: nextState
+        };
+      }
+      return curr;
+    });
+    setItems(updatedList);
+    localStorage.setItem("8twelve_inventory", JSON.stringify(updatedList));
+  };
+
   // Easy inline stock updates from ProductCard
   const handleQuickStockUpdate = (item: InventoryItem, newStock: number, remarks: string) => {
     const updatedList = items.map(curr => {
@@ -929,8 +979,12 @@ export default function App() {
     }
   };
 
+  // Active shelf items vs inactive/ignored ones
+  const activeItems = items.filter(item => !item.inactive);
+  const inactiveItems = items.filter(item => !!item.inactive);
+
   // Filter & Sort core engine
-  const filteredProducts = items.filter((item) => {
+  const filteredProducts = activeItems.filter((item) => {
     // Search filter: acts on Name, Article Code, Barcode, or list of Aliases
     const matchesSearch =
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -989,6 +1043,35 @@ export default function App() {
   }
   const displayPages = chunkedPages.length > 0 ? chunkedPages : [[]];
 
+  // Filter items updated in the configured audit window
+  const auditedItemsInWindow = activeItems.filter(item => {
+    if (!item.lastUpdatedTime) return false;
+    const timeMs = new Date(item.lastUpdatedTime).getTime();
+    const thresholdMs = Date.now() - (auditHoursWindow * 60 * 60 * 1000);
+    return timeMs >= thresholdMs;
+  });
+
+  const auditCompletionPercentage = activeItems.length > 0 
+    ? Math.round((auditedItemsInWindow.length / activeItems.length) * 100) 
+    : 0;
+
+  // Active items that are older than threshold or never updated
+  const pendingAudits = activeItems.filter(item => {
+    if (!item.lastUpdatedTime) return true;
+    const timeMs = new Date(item.lastUpdatedTime).getTime();
+    const thresholdMs = Date.now() - (auditHoursWindow * 60 * 60 * 1000);
+    return timeMs < thresholdMs;
+  });
+
+  const next5ToAudit = [...pendingAudits]
+    .sort((a, b) => {
+      if (!a.lastUpdatedTime && !b.lastUpdatedTime) return 0;
+      if (!a.lastUpdatedTime) return -1;
+      if (!b.lastUpdatedTime) return 1;
+      return new Date(a.lastUpdatedTime).getTime() - new Date(b.lastUpdatedTime).getTime();
+    })
+    .slice(0, 5);
+
   return (
     <div
       onDragEnter={handleCsvDrag}
@@ -1000,106 +1083,145 @@ export default function App() {
       }`}
     >
       
-      {/* 8TWELVE BRAND HEADER (Bento Theme Style) */}
-      <header id="brand-header" className="mx-4 mt-6 md:mx-8 md:mt-8 bg-white border border-zinc-200 rounded-2xl p-4 shadow-sm sticky top-4 z-40 no-print">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          
-          {/* Logo Brand Title with "8TWELVE" Bento Style */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-extrabold text-xl shadow-xs select-none">
-              8
+      {/* 8TWELVE BRAND HEADER (Bento Theme Style - Compact with Mobile Collapsible Menu) */}
+      <header id="brand-header" className="mx-4 mt-4 md:mx-8 md:mt-8 bg-white border border-zinc-200 rounded-2xl p-3 md:p-4 shadow-sm sticky top-4 z-40 no-print">
+        <div className="max-w-7xl mx-auto">
+          {/* Top Main Row - Compact & Single-line on mobile */}
+          <div className="flex items-center justify-between">
+            {/* Logo Brand Title with "8TWELVE" */}
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-extrabold text-lg md:text-xl shadow-xs select-none">
+                8
+              </div>
+              <div>
+                <h1 className="text-lg md:text-2xl font-black tracking-tight text-zinc-800 leading-none">
+                  8TWELVE <span className="text-emerald-600 font-normal">STOCK</span>
+                </h1>
+                <p className="text-[9px] md:text-[10px] text-zinc-400 font-mono hidden sm:flex items-center gap-1 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                  Live Store Database &bull; LocalSync Active
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-zinc-800 leading-none">
-                8TWELVE <span className="text-emerald-600 font-normal">STOCK</span>
-              </h1>
-              <p className="text-[10px] text-zinc-400 font-mono flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
-                Live Store Database &bull; LocalSync Active
-              </p>
-            </div>
-          </div>
 
-          {/* Center clock widget */}
-          <div className="flex items-center bg-zinc-50 border border-zinc-200/50 rounded-xl px-4 py-1.5 text-zinc-600 h-9">
-            <Clock className="w-4 h-4 text-emerald-600 mr-2 shrink-0" />
-            <span className="text-xs font-mono font-bold tracking-widest text-zinc-800 mr-2">{localTime}</span>
-            <div className="h-3 w-[1px] bg-zinc-200 mr-2" />
-            <Calendar className="w-3.5 h-3.5 text-amber-500 mr-1.5 shrink-0" />
-            <span className="text-[11px] font-semibold text-zinc-500 whitespace-nowrap">
-              {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-            </span>
-          </div>
+            {/* Right Controls - Mobile Menu Toggle Button & Desktop-Only Items */}
+            <div className="flex items-center gap-2">
+              {/* Clock - Visible on Desktop or Tablet */}
+              <div className="hidden md:flex items-center bg-zinc-50 border border-zinc-200/50 rounded-xl px-4 py-1.5 text-zinc-600 h-9">
+                <Clock className="w-4 h-4 text-emerald-600 mr-2 shrink-0" />
+                <span className="text-xs font-mono font-bold tracking-widest text-zinc-800 mr-2">{localTime}</span>
+                <div className="h-3 w-[1px] bg-zinc-200 mr-2" />
+                <Calendar className="w-3.5 h-3.5 text-amber-500 mr-1.5 shrink-0" />
+                <span className="text-[11px] font-semibold text-zinc-500 whitespace-nowrap">
+                  {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                </span>
+              </div>
 
-          {/* Header Actions */}
-          <div className="flex flex-wrap items-center justify-center md:justify-end gap-2 shrink-0">
-            {/* Shelf Audit Mode switch minimized to top nav bar */}
-            <div className="flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 h-9 transition-all text-xs font-bold shrink-0">
-              <span className={`text-[10px] font-mono tracking-tight ${isAuditMode ? "text-emerald-600 font-extrabold animate-pulse" : "text-zinc-500"}`}>
-                {isAuditMode ? "⚡ AUDIT ACTIVE" : "👁️ CATALOG VIEW"}
-              </span>
+              {/* Mobile Menu Action Trigger Button */}
               <button
-                id="header-toggle-audit-mode"
                 type="button"
-                onClick={() => {
-                  const newValue = !isAuditMode;
-                  setIsAuditMode(newValue);
-                  localStorage.setItem("8twelve_audit_mode", String(newValue));
-                  triggerAlert(newValue ? "Enabled linear Audit Mode dashboard." : "Returned to standard explorer dashboard.", "info");
-                }}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-250 ease-in-out focus:outline-none ${
-                  isAuditMode ? "bg-emerald-600" : "bg-zinc-300"
-                }`}
-                title="Toggle Shelf Stock Audit Mode"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden flex items-center justify-center p-2 rounded-xl text-zinc-600 hover:bg-zinc-50 hover:text-zinc-950 border border-zinc-200 active:scale-95 transition-all cursor-pointer"
+                aria-label="Toggle Navigation Menu"
               >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-250 ease-in-out ${
-                    isAuditMode ? "translate-x-4" : "translate-x-0"
-                  }`}
-                />
+                {isMobileMenuOpen ? <X className="w-5 h-5 text-zinc-800" /> : <Menu className="w-5 h-5 text-zinc-800" />}
               </button>
             </div>
+          </div>
 
-            {/* Download A4 Landscape PDF Button */}
-            <button
-              id="top-btn-print-all"
-              onClick={() => {
-                setIsPrintPreviewOpen(true);
-                triggerAlert("Opening master A4 stock sheet download station...", "info");
-              }}
-              className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 h-9 px-3.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs"
-              title="Compile inventory lists as A4 Landscape PDF report"
-            >
-              <FileDown className="w-3.5 h-3.5 text-amber-600" />
-              <span>A4 Landscape PDF</span>
-            </button>
+          {/* COLLAPSIBLE MENU BLOCK FOR MOBILE / DIRECT INLINE DISPLAY ON DESKTOP */}
+          <div className={`${isMobileMenuOpen ? "flex mt-3 pt-3 border-t border-zinc-100" : "hidden"} md:flex md:mt-0 md:pt-0 md:border-0 flex-col md:flex-row md:items-center md:justify-between`}>
+            
+            {/* Subtitle/Status only visible inside expanded phone menu */}
+            <div className="md:hidden flex items-center justify-between text-[11px] bg-zinc-50 p-2.5 rounded-xl border border-zinc-150 mb-3 w-full">
+              <span className="font-mono text-zinc-500 flex items-center gap-1.5 select-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                LocalSync DB: Active
+              </span>
+              <span className="font-mono text-zinc-650 flex items-center gap-1 font-bold">
+                <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                {localTime}
+              </span>
+            </div>
 
-            {/* Custom CSV upload button */}
-            <label className="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 h-9 px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer border border-zinc-200/60 transition-all active:scale-95">
-              <Upload className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Import Sheet CSV</span>
-              <input
-                id="bulk-csv-uploader"
-                type="file"
-                accept=".csv"
-                onChange={handleCsvImport}
-                className="hidden"
-              />
-            </label>
+            {/* Header Actions Grid */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-end gap-2 shrink-0 w-full mt-1 md:mt-0">
+              
+              {/* Shelf Audit Mode switch */}
+              <div className="flex items-center justify-between md:justify-start gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 h-9 transition-all text-xs font-bold leading-none">
+                <span className={`text-[10px] font-mono tracking-tight ${isAuditMode ? "text-emerald-600 font-extrabold animate-pulse" : "text-zinc-500"}`}>
+                  {isAuditMode ? "⚡ AUDIT ACTIVE" : "👁️ CATALOG VIEW"}
+                </span>
+                <button
+                  id="header-toggle-audit-mode"
+                  type="button"
+                  onClick={() => {
+                    const newValue = !isAuditMode;
+                    setIsAuditMode(newValue);
+                    localStorage.setItem("8twelve_audit_mode", String(newValue));
+                    triggerAlert(newValue ? "Enabled linear Audit Mode dashboard." : "Returned to standard explorer dashboard.", "info");
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-250 ease-in-out focus:outline-none ${
+                    isAuditMode ? "bg-emerald-600" : "bg-zinc-300"
+                  }`}
+                  title="Toggle Shelf Stock Audit Mode"
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-250 ease-in-out ${
+                      isAuditMode ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
 
-            {/* Quick register product trigger */}
-            <button
-              id="btn-add-new-item"
-              onClick={() => {
-                setEditingItem(null);
-                setPrefilledBarcode("");
-                setIsModalOpen(true);
-              }}
-              className="flex items-center gap-2 bg-zinc-900 text-white h-9 px-4 rounded-xl font-medium text-xs hover:bg-zinc-800 transition-all active:scale-95"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Item</span>
-            </button>
+              {/* Download A4 Landscape PDF Button */}
+              <button
+                id="top-btn-print-all"
+                type="button"
+                onClick={() => {
+                  setIsPrintPreviewOpen(true);
+                  setIsMobileMenuOpen(false);
+                  triggerAlert("Opening master A4 stock sheet download station...", "info");
+                }}
+                className="flex items-center justify-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 h-9 px-3.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs"
+                title="Compile inventory lists as A4 Landscape PDF report"
+              >
+                <FileDown className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>A4 Landscape PDF</span>
+              </button>
+
+              {/* Custom CSV upload button */}
+              <label className="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 h-9 px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer border border-zinc-200/60 transition-all active:scale-95 text-center">
+                <Upload className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Import Sheet CSV</span>
+                <input
+                  id="bulk-csv-uploader"
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => {
+                    handleCsvImport(e);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="hidden"
+                />
+              </label>
+
+              {/* Quick register product trigger */}
+              <button
+                id="btn-add-new-item"
+                type="button"
+                onClick={() => {
+                  setEditingItem(null);
+                  setPrefilledBarcode("");
+                  setIsModalOpen(true);
+                  setIsMobileMenuOpen(false);
+                }}
+                className="flex items-center justify-center gap-2 bg-zinc-900 text-white h-9 px-4 rounded-xl font-medium text-xs hover:bg-zinc-800 transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span>Add Item</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -1129,6 +1251,391 @@ export default function App() {
                 <Check className="w-3.5 h-3.5 text-emerald-400" />
               </span>
               <p className="pl-1 text-slate-200">{alertMessage.text}</p>
+            </div>
+          )}
+
+          {/* VISUAL SHELF AUDIT PROGRESS CARD WITH THRESHOLD SETTING */}
+          <div className="bg-white border border-zinc-200 rounded-2xl p-3.5 shadow-xs space-y-2 no-print">
+            <div 
+              className="flex flex-row items-center justify-between gap-2 cursor-pointer select-none hover:bg-zinc-50/70 p-1.5 rounded-xl transition-all"
+              onClick={() => setShowNext5(!showNext5)}
+              title="Click to view pending shelf items"
+            >
+              <div className="flex flex-wrap items-center gap-x-2 text-zinc-800">
+                <span className="text-xs font-black tracking-tight font-sans inline-flex items-center gap-1">
+                  Continuous Shelf Verification
+                  <span className="text-[10px] text-zinc-400">
+                    {showNext5 ? "▲ Hide Pending List" : "▼ Show Pending List"}
+                  </span>
+                </span>
+                <span className="text-[10px] font-mono text-zinc-450 bg-zinc-100 rounded px-1.5 py-0.5 border border-zinc-200/40 select-none" onClick={(e) => e.stopPropagation()}>
+                  {auditHoursWindow}h Window
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 font-mono" onClick={(e) => e.stopPropagation()}>
+                <div 
+                  className="text-right flex items-center gap-1.5 cursor-pointer hover:opacity-85"
+                  onClick={() => setShowNext5(!showNext5)}
+                >
+                  <span className="text-xs font-bold text-zinc-950">
+                    {auditedItemsInWindow.length}
+                  </span>
+                  <span className="text-[10px] text-zinc-450">
+                    /{activeItems.length} SKUs
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded ml-0.5">
+                    {auditCompletionPercentage}%
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsThresholdMenuOpen(!isThresholdMenuOpen)}
+                  className={`p-1.5 rounded-lg border text-[10px] font-bold transition-all active:scale-95 inline-flex items-center justify-center cursor-pointer select-none ${
+                    isThresholdMenuOpen
+                      ? "bg-zinc-950 border-zinc-950 text-white"
+                      : "bg-zinc-50 border-zinc-200 hover:border-zinc-300 text-zinc-700"
+                  }`}
+                  title="Configure Audit Window"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Flat visual progress bar */}
+            <div 
+              className="relative w-full h-2 bg-zinc-100 rounded-full border border-zinc-200/60 overflow-hidden shadow-inner font-sans cursor-pointer"
+              onClick={() => setShowNext5(!showNext5)}
+              title="Click to view pending shelf items"
+            >
+              <div 
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 transition-all duration-500 ease-out rounded-full"
+                style={{ width: `${auditCompletionPercentage}%` }}
+              />
+              <div className="absolute inset-y-0 left-0 right-0 bg-linear-to-b from-white/10 to-transparent pointer-events-none" />
+            </div>
+
+            {/* Threshold controls block */}
+            {isThresholdMenuOpen && (
+              <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-2xl space-y-3.5 animate-fade-in text-xs font-sans">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-zinc-650 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    Configure Audit Run Window:
+                  </span>
+                  {/* Slider hours display with quick minus/plus buttons */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={auditHoursWindow <= 24}
+                      onClick={() => handleAuditHoursChange(auditHoursWindow - 12)}
+                      className="w-10 h-7 bg-white hover:bg-zinc-100 border border-zinc-200 rounded-lg text-xs font-bold font-mono inline-flex items-center justify-center transition-all select-none disabled:opacity-40 disabled:pointer-events-none"
+                      title="Decrease by 12 hours"
+                    >
+                      -12h
+                    </button>
+                    <span className="text-xs font-mono font-black py-1 px-2.5 bg-zinc-200 text-zinc-800 rounded-lg min-w-[55px] text-center">
+                      {auditHoursWindow} hrs
+                    </span>
+                    <button
+                      type="button"
+                      disabled={auditHoursWindow >= 240}
+                      onClick={() => handleAuditHoursChange(auditHoursWindow + 12)}
+                      className="w-10 h-7 bg-white hover:bg-zinc-100 border border-zinc-200 rounded-lg text-xs font-bold font-mono inline-flex items-center justify-center transition-all select-none disabled:opacity-40 disabled:pointer-events-none"
+                      title="Increase by 12 hours"
+                    >
+                      +12h
+                    </button>
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="24"
+                    max="240"
+                    step="1"
+                    value={auditHoursWindow}
+                    onChange={(e) => handleAuditHoursChange(parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-zinc-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none focus:ring-0"
+                  />
+                  <div className="flex justify-between text-[9px] font-mono font-bold text-zinc-405 select-none">
+                    <span>Min: 24h (1d)</span>
+                    <span>Standard: 48h (2d)</span>
+                    <span>Max: 240h (10d)</span>
+                  </div>
+                </div>
+
+                {/* Quick select presets */}
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[9px] font-mono text-zinc-400 uppercase font-black tracking-wide mr-1 select-none">Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAuditHoursChange(24)}
+                    className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded-md border transition-all ${
+                      auditHoursWindow === 24 
+                        ? 'bg-zinc-900 border-zinc-900 text-white' 
+                        : 'bg-white border-zinc-200 hover:border-zinc-300 text-zinc-650'
+                    }`}
+                  >
+                    24h (1d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAuditHoursChange(48)}
+                    className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded-md border transition-all ${
+                      auditHoursWindow === 48 
+                        ? 'bg-zinc-900 border-zinc-900 text-white' 
+                        : 'bg-white border-zinc-200 hover:border-zinc-300 text-zinc-700'
+                    }`}
+                  >
+                    48h (2d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAuditHoursChange(120)}
+                    className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded-md border transition-all ${
+                      auditHoursWindow === 120 
+                        ? 'bg-zinc-900 border-zinc-900 text-white' 
+                        : 'bg-white border-zinc-200 hover:border-zinc-300 text-zinc-700'
+                    }`}
+                  >
+                    120h (5d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAuditHoursChange(240)}
+                    className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded-md border transition-all ${
+                      auditHoursWindow === 240 
+                        ? 'bg-zinc-900 border-zinc-900 text-white' 
+                        : 'bg-white border-zinc-200 hover:border-zinc-300 text-zinc-700'
+                    }`}
+                  >
+                    240h (10d)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* NEXT 5 PENDING ITEMS SECTION LINKED TO SHELF VERIFICATION */}
+          {showNext5 && (
+            <div className="bg-white border border-zinc-200 rounded-2xl p-4 shadow-sm space-y-3 animate-fade-in text-xs font-sans no-print">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-150 pb-2.5 mb-2">
+                <div className="flex items-center gap-1.5 font-bold text-zinc-800">
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="uppercase text-[10px] tracking-wider text-zinc-500 font-mono font-bold">Recommended Queue</span>
+                  <span className="text-zinc-700">&bull; Next 5 SKUs Needing Verification:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowInactiveModal(true)}
+                    className="text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 hover:border-amber-300 transition-all cursor-pointer inline-flex items-center gap-1 shrink-0 active:scale-95"
+                    title="Open list of ignored inactive items"
+                  >
+                    <EyeOff className="w-3 h-3 text-amber-600" />
+                    <span>Ignored List ({inactiveItems.length})</span>
+                  </button>
+                  <span className="text-[10px] text-zinc-400 font-mono bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
+                    {pendingAudits.length} pending total
+                  </span>
+                </div>
+              </div>
+
+              {next5ToAudit.length > 0 ? (
+                <div className="divide-y divide-zinc-100">
+                  {next5ToAudit.map((item, idx) => {
+                    const lastAuditString = item.lastUpdatedTime 
+                      ? new Date(item.lastUpdatedTime).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })
+                      : "Never Audited";
+
+                    return (
+                      <div key={item.id} className="py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-3 first:pt-0 last:pb-0 animate-fade-in">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="bg-zinc-100 text-zinc-650 py-0.5 px-1.5 rounded-md text-[10px] font-extrabold font-mono border border-zinc-200">
+                              #{idx + 1}
+                            </span>
+                            <strong className="text-zinc-900 font-black text-xs">{item.name}</strong>
+                            <span className="text-[10px] font-mono text-zinc-500 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-200/50 block sm:inline-block">
+                              #{item.articleCode}
+                            </span>
+                            <span className="bg-emerald-50 text-emerald-800 text-[10px] py-0.5 px-2 rounded-full font-bold">
+                              {item.location}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-500 mt-1.5 font-mono">
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                              Last Audit: <strong className="text-zinc-700">{lastAuditString}</strong>
+                            </span>
+                            <span>&bull;</span>
+                            <span>
+                              Shelf Stock: <strong className="text-zinc-800 font-bold">{item.stock} units</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedAuditItem(item);
+                              if (!isAuditMode) {
+                                setIsAuditMode(true);
+                                localStorage.setItem("8twelve_audit_mode", "true");
+                              }
+                              setIsStep1Collapsed(true);
+                              triggerAlert(`Loaded "${item.name}" into target scanner simulator`, "success");
+                              setTimeout(() => {
+                                document.getElementById("btn-expand-step1")?.scrollIntoView({ behavior: 'smooth' });
+                              }, 150);
+                            }}
+                            className="px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white font-bold text-[10.5px] rounded-lg transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center gap-1"
+                            title="Open in manual scanner console below"
+                          >
+                            Scan/Verify
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playBeepSoundAt(beepVolume);
+                              handleQuickStockUpdate(item, item.stock, "Verified Correct (Continuous Shelf Verification)");
+                              triggerAlert(`Shelf quantity of "${item.name}" verified correct.`, "success");
+                            }}
+                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10.5px] rounded-lg transition-all active:scale-95 cursor-pointer shadow-xs inline-flex items-center gap-1"
+                            title="Verify current count is accurate"
+                          >
+                            <Check className="w-3.5 h-3.5 shrink-0" />
+                            Correct ({item.stock})
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleInactive(item.id, item.name)}
+                            className="px-2 py-1.5 bg-zinc-50 hover:bg-amber-50 border border-zinc-200 hover:border-amber-300 text-zinc-500 hover:text-amber-800 font-bold text-[10.5px] rounded-lg transition-all active:scale-95 cursor-pointer inline-flex items-center gap-1"
+                            title="Flag as ignored/inactive (removes from verification targets)"
+                          >
+                            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                            Ignore
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-6 text-center bg-zinc-50 border border-dashed border-zinc-200 rounded-2xl">
+                  <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2 animate-bounce" />
+                  <p className="text-zinc-600 font-bold text-xs font-sans">All active products on shelves are freshly audited!</p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5">Continuous verification target is 100% complete for the {auditHoursWindow}h window.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* INACTIVE/IGNORED ITEMS LIST MODAL OVERLAY */}
+          {showInactiveModal && (
+            <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 no-print animate-fade-in" onClick={() => setShowInactiveModal(false)}>
+              <div 
+                className="bg-white rounded-3xl border border-zinc-200 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] animate-slide-up"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="bg-zinc-900 text-white px-5 py-4 flex items-center justify-between border-b border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-400">
+                      <EyeOff className="w-4 h-4 shrink-0" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-xs uppercase tracking-wider font-sans">Ignored &amp; Inactive Shelf Products</h4>
+                      <p className="text-[9px] text-zinc-400 font-mono font-medium">Excluded from Continuous Verification requirements</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowInactiveModal(false)}
+                    className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors text-zinc-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-5 overflow-y-auto space-y-4 flex-1">
+                  <p className="text-xs text-zinc-500 leading-relaxed">
+                    Marking products as item-inactive shields them from auditing percentages and standard search/shelf catalog renders. Use this status for seasonal products, temporary stock-outs, or non-tracked sundries.
+                  </p>
+
+                  {inactiveItems.length > 0 ? (
+                    <div className="divide-y divide-zinc-150 border border-zinc-200/65 rounded-2xl overflow-hidden bg-zinc-50/10">
+                      {inactiveItems.map((item) => (
+                        <div key={item.id} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white hover:bg-zinc-50/30 transition-colors">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <strong className="text-zinc-800 font-bold text-xs">{item.name}</strong>
+                              <span className="text-[9px] font-mono font-bold bg-zinc-100 text-zinc-500 px-1 border border-zinc-200/50 rounded">
+                                #{item.articleCode}
+                              </span>
+                              <span className="text-[9px] bg-zinc-150 text-zinc-550 py-0.5 px-1.5 rounded uppercase font-bold tracking-wide">
+                                {item.category}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-2 font-mono">
+                              <span>Location: <strong className="text-zinc-600 font-semibold">{item.location}</strong></span>
+                              <span>&bull;</span>
+                              <span>Stock: <strong className="text-zinc-750 font-bold">{item.stock} qty</strong></span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleInactive(item.id, item.name)}
+                            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white font-mono font-bold text-[10px] rounded-lg transition-all active:scale-95 cursor-pointer inline-flex items-center gap-1 self-start sm:self-auto"
+                            title="Restore item to active list"
+                          >
+                            <Eye className="w-3.5 h-3.5 shrink-0" />
+                            Re-activate Item
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-10 bg-zinc-50 rounded-2xl border border-dashed border-zinc-200">
+                      <Eye className="w-8 h-8 text-zinc-350 mx-auto mb-2" />
+                      <h4 className="font-bold text-zinc-750 text-xs">No Deactivated Products Found</h4>
+                      <p className="text-[10px] text-zinc-400 max-w-xs mx-auto mt-0.5">
+                        All currently cataloged items are tracking active shelf verification protocols.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 bg-zinc-50 border-t border-zinc-150 flex justify-end font-sans">
+                  <button
+                    type="button"
+                    onClick={() => setShowInactiveModal(false)}
+                    className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold rounded-xl transition-all font-sans cursor-pointer"
+                  >
+                    Close Panel
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1893,6 +2400,7 @@ export default function App() {
                     }}
                     onDelete={handleDeleteItem}
                     onQuickStockUpdate={handleQuickStockUpdate}
+                    onToggleInactive={handleToggleInactive}
                   />
                 ))}
               </div>
