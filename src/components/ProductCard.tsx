@@ -135,6 +135,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             <span>Audit: {new Date(item.lastUpdatedTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} ({item.lastUpdatedStock} qty)</span>
           </div>
         )}
+
+        {/* Zebra stock metadata indicator */}
+        <div className="mt-2.5 flex items-center justify-between text-[10px] text-zinc-500 font-mono bg-slate-50/70 p-2 rounded-xl border border-zinc-150">
+          <span className="font-sans font-black flex items-center gap-1 text-slate-700 uppercase tracking-tight text-[9px]">
+            🦓 Zebra Stock: 
+            <span className="font-mono bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded font-black">
+              {item.zebraStock !== undefined ? `${item.zebraStock} units` : "—"}
+            </span>
+          </span>
+          <span className="text-[9px] text-zinc-400">
+            {item.zebraLastUpdated 
+              ? new Date(item.zebraLastUpdated).toLocaleString(undefined, {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}) 
+              : "No scan"
+            }
+          </span>
+        </div>
       </div>
 
       {/* Stock level setting panel inside card */}

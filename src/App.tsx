@@ -41,7 +41,10 @@ import {
   Scan,
   Camera,
   Volume2,
-  VolumeX
+  VolumeX,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft
 } from "lucide-react";
 
 // Deterministic standard EAN-13 / UPC-A Barcode Generator Component
@@ -265,6 +268,10 @@ export default function App() {
   const [showInactiveModal, setShowInactiveModal] = useState(false);
 
   // Audit Mode states
+  const [isZebraMode, setIsZebraMode] = useState<boolean>(false);
+  const [zebraCurrentIndex, setZebraCurrentIndex] = useState<number>(0);
+  const [zebraStockInput, setZebraStockInput] = useState<string>("");
+
   const [isAuditMode, setIsAuditMode] = useState<boolean>(() => {
     return localStorage.getItem("8twelve_audit_mode") === "true";
   });
@@ -687,6 +694,45 @@ export default function App() {
     const updatedLogs = [adjustmentLog, ...logs];
     setLogs(updatedLogs);
     localStorage.setItem("8twelve_logs", JSON.stringify(updatedLogs));
+  };
+
+  // Zebra Mode stock verification handler
+  const handleZebraStockSubmit = (targetItem: InventoryItem, inputVal: string, currentIndexInQueue: number, queueList: InventoryItem[]) => {
+    if (!targetItem) return;
+    const parsed = inputVal === "" ? undefined : Number(inputVal);
+    if (parsed !== undefined && (isNaN(parsed) || parsed < 0)) {
+      triggerAlert("Please specify a valid non-negative Zebra stock count.", "info");
+      return;
+    }
+
+    const finalVal = parsed !== undefined ? Math.floor(parsed) : 0;
+    const updatedList = items.map(curr => {
+      if (curr.id === targetItem.id) {
+        return {
+          ...curr,
+          zebraStock: finalVal,
+          zebraLastUpdated: new Date().toISOString()
+        };
+      }
+      return curr;
+    });
+
+    setItems(updatedList);
+    localStorage.setItem("8twelve_inventory", JSON.stringify(updatedList));
+
+    // Play simulated laser scan beep sound
+    playBeepSoundAt(beepVolume);
+    triggerAlert(`Updated Zebra handheld stock of "${targetItem.name}" to ${finalVal} units.`, "success");
+
+    // Advance to next index dynamically if available in queueList
+    if (currentIndexInQueue < queueList.length - 1) {
+      const nextIdx = currentIndexInQueue + 1;
+      setZebraCurrentIndex(nextIdx);
+      const nextItem = queueList[nextIdx];
+      setZebraStockInput(nextItem && nextItem.zebraStock !== undefined ? String(nextItem.zebraStock) : "");
+    } else {
+      triggerAlert("Congratulations! You have completed the Zebra stock audit for this filtered series.", "success");
+    }
   };
 
   // Audit Mode stock update, persistent history, and state cleanser
@@ -1144,9 +1190,38 @@ export default function App() {
               </span>
             </div>
 
-            {/* Header Actions Grid */}
+             {/* Header Actions Grid */}
             <div className="flex flex-col md:flex-row items-stretch md:items-center justify-end gap-2 shrink-0 w-full mt-1 md:mt-0">
               
+              {/* Zebra Audit Mode switch */}
+              <div className="flex items-center justify-between md:justify-start gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 h-9 transition-all text-xs font-bold leading-none">
+                <span className={`text-[10px] font-mono tracking-tight ${isZebraMode ? "text-amber-700 font-extrabold animate-pulse" : "text-zinc-500"}`}>
+                  {isZebraMode ? "🦓 ZEBRA ACTIVE" : "🦓 ZEBRA MODE"}
+                </span>
+                <button
+                  id="header-toggle-zebra-mode"
+                  type="button"
+                  onClick={() => {
+                    const newValue = !isZebraMode;
+                    setIsZebraMode(newValue);
+                    if (newValue) {
+                      setIsAuditMode(false); // disable regular audit mode
+                    }
+                    triggerAlert(newValue ? "Enabled Zebra barcode 1-by-1 audit flow." : "Returned to standard explorer dashboard.", "info");
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-250 ease-in-out focus:outline-none ${
+                    isZebraMode ? "bg-amber-600" : "bg-zinc-300"
+                  }`}
+                  title="Toggle Zebra Stock Audit Mode (1-by-1 Barcode Verification)"
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-250 ease-in-out ${
+                      isZebraMode ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
               {/* Shelf Audit Mode switch */}
               <div className="flex items-center justify-between md:justify-start gap-1.5 bg-zinc-50 border border-zinc-200 rounded-xl px-2.5 h-9 transition-all text-xs font-bold leading-none">
                 <span className={`text-[10px] font-mono tracking-tight ${isAuditMode ? "text-emerald-600 font-extrabold animate-pulse" : "text-zinc-500"}`}>
@@ -1158,6 +1233,9 @@ export default function App() {
                   onClick={() => {
                     const newValue = !isAuditMode;
                     setIsAuditMode(newValue);
+                    if (newValue) {
+                      setIsZebraMode(false); // disable zebra mode
+                    }
                     localStorage.setItem("8twelve_audit_mode", String(newValue));
                     triggerAlert(newValue ? "Enabled linear Audit Mode dashboard." : "Returned to standard explorer dashboard.", "info");
                   }}
@@ -1641,7 +1719,335 @@ export default function App() {
 
 
 
-          {isAuditMode ? (
+          {isZebraMode ? (
+            /* ZEBRA AUDIT WORKSPACE STATION */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
+              {/* LEFT COLUMN: THE CURRENT SKU VERIFICATION FRAMEWORK (7 cols) */}
+              <div className="lg:col-span-7 space-y-6">
+                <div className="bg-white border border-zinc-200 rounded-3xl p-6 shadow-sm space-y-6">
+                  {/* Card Header progress tracker */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-100 pb-4">
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-wider text-amber-800 flex items-center gap-1.5 font-sans">
+                        <span>🦓 Zebra Handheld Audit Terminal</span>
+                        <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono">
+                          SIMULATOR
+                        </span>
+                      </h3>
+                      <p className="text-xs text-zinc-500 font-sans mt-0.5">
+                        Verify stock physically and record counts separately into the Zebra terminal ledger.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsZebraMode(false);
+                        triggerAlert("Exit Zebra mode. Returned to catalog view.", "info");
+                      }}
+                      className="px-3.5 py-1.5 bg-zinc-150 hover:bg-zinc-200 text-zinc-800 text-[11px] font-black rounded-lg transition-all active:scale-95 cursor-pointer max-w-max self-start sm:self-auto flex items-center gap-1 font-sans"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      Exit Zebra
+                    </button>
+                  </div>
+
+                  {(() => {
+                    const zebraItems = sortedProducts;
+                    const safeZebraIndex = Math.min(zebraCurrentIndex, Math.max(0, zebraItems.length - 1));
+                    const currentZebraItem = zebraItems[safeZebraIndex] || null;
+
+                    if (currentZebraItem) {
+                      return (
+                        <div className="space-y-6">
+                          {/* Active Item Description card */}
+                          <div className="bg-zinc-50/55 rounded-2xl border border-zinc-150 p-5 space-y-5">
+                            <div className="flex justify-between items-start gap-2">
+                              <div>
+                                <span className="bg-zinc-200 text-zinc-700 px-2.5 py-0.5 rounded font-mono font-bold text-[10px] uppercase">
+                                  {currentZebraItem.category}
+                                </span>
+                                <h4 className="text-zinc-900 font-extrabold text-base mt-2">
+                                  {currentZebraItem.name}
+                                </h4>
+                                <p className="text-xs font-mono text-zinc-500 mt-1">
+                                  Article Code: <strong className="text-zinc-800 font-bold">#{currentZebraItem.articleCode}</strong>
+                                  {" • "}
+                                  Shelf Zone: <strong className="text-zinc-800 font-bold">{currentZebraItem.location}</strong>
+                                </p>
+                              </div>
+
+                              <div className="text-right">
+                                <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-black font-mono block">
+                                  Active Queue Index
+                                </span>
+                                <span className="text-2xl font-black font-mono text-zinc-800">
+                                  {safeZebraIndex + 1} / {zebraItems.length}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Barcode representation (MANDATORY REQUIREMENT) */}
+                            <div className="bg-white border border-zinc-200 rounded-xl p-4 flex flex-col items-center justify-center space-y-2 mt-4 shadow-xs">
+                              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest leading-none">
+                                EAN Barcode to scan
+                              </span>
+                              <BarcodeVisual value={currentZebraItem.barcode} />
+                              <span className="text-xs font-mono font-bold text-zinc-650 bg-zinc-100 rounded px-2.5 py-0.5 border border-zinc-200/60 tracking-wider">
+                                {currentZebraItem.barcode}
+                              </span>
+                            </div>
+
+                            {/* Inventory Context metrics comparison */}
+                            <div className="grid grid-cols-2 gap-3 pt-2">
+                              <div className="bg-white rounded-xl border border-zinc-200/80 p-3 text-center shadow-2xs">
+                                <span className="text-[10px] font-black uppercase text-zinc-400 font-mono block">
+                                  System Stock
+                                </span>
+                                <span className="text-xl font-mono font-black text-zinc-800 block mt-0.5">
+                                  {currentZebraItem.stock}
+                                </span>
+                              </div>
+
+                              <div className="bg-amber-50/20 rounded-xl border border-amber-200/50 p-3 text-center shadow-2xs">
+                                <span className="text-[10px] font-black uppercase text-amber-700 font-mono block">
+                                  Current Zebra Stock
+                                </span>
+                                <span className="text-xl font-mono font-black text-amber-950 block mt-0.5">
+                                  {currentZebraItem.zebraStock !== undefined ? currentZebraItem.zebraStock : "—"}
+                                </span>
+                                {currentZebraItem.zebraLastUpdated && (
+                                  <p className="text-[8px] font-mono text-zinc-455 leading-none mt-1 truncate">
+                                    Updated: {new Date(currentZebraItem.zebraLastUpdated).toLocaleString()}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Counting input box */}
+                          <div className="pt-2 space-y-4 font-sans">
+                            <div>
+                              <label className="block text-xs font-black uppercase text-zinc-500 font-mono mb-1.5">
+                                Enter Handheld Count Quantity
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Type item stock reading manually..."
+                                  value={zebraStockInput}
+                                  onChange={(e) => setZebraStockInput(e.target.value)}
+                                  className="w-full text-xl font-mono font-bold bg-zinc-50 focus:bg-white border-2 border-zinc-200 focus:border-amber-500 rounded-2xl px-4 py-3 text-zinc-900 focus:outline-none transition-all shadow-inner"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      handleZebraStockSubmit(currentZebraItem, zebraStockInput, safeZebraIndex, zebraItems);
+                                    }
+                                  }}
+                                  autoFocus
+                                />
+                                <span className="absolute right-4 top-3.5 text-xs font-mono font-bold text-zinc-400 select-none">
+                                  QTY
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-zinc-450 mt-1.5 leading-normal">
+                                👉 Simply type the manual count reading, then press <strong>Enter</strong> to commit Zebra Stock and automatically advance to the next barcode.
+                              </p>
+                            </div>
+
+                            {/* Preset helpers buttons */}
+                            <div className="space-y-1.5">
+                              <span className="block text-[10px] font-mono font-extrabold text-zinc-400 uppercase tracking-wider">
+                                Quick Count Presets
+                              </span>
+                              <div className="flex flex-wrap gap-1.5 font-sans">
+                                {[0, 1, 2, 5, 10, 12, 15, 20, 24, 30, 50, 100].map((preset) => (
+                                  <button
+                                    type="button"
+                                    key={preset}
+                                    onClick={() => {
+                                      setZebraStockInput(String(preset));
+                                      playBeepSoundAt(beepVolume);
+                                    }}
+                                    className="px-3 py-1.5 bg-zinc-100 hover:bg-amber-50 border border-zinc-200 hover:border-amber-300 rounded-lg text-xs font-mono font-bold text-zinc-700 hover:text-amber-950 transition-all cursor-pointer"
+                                  >
+                                    {preset}
+                                  </button>
+                                ))}
+                                {currentZebraItem.stock !== undefined && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setZebraStockInput(String(currentZebraItem.stock));
+                                      playBeepSoundAt(beepVolume);
+                                    }}
+                                    className="px-3 py-1.5 bg-emerald-55 bg-emerald-50 hover:bg-emerald-100 border border-emerald-250 rounded-lg text-xs font-mono text-emerald-800 transition-all cursor-pointer flex items-center gap-1 font-bold"
+                                    title="Copy catalog physical stock value"
+                                  >
+                                    {currentZebraItem.stock} (Match System)
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Action submission buttons */}
+                            <div className="pt-3 flex flex-col sm:flex-row gap-3">
+                              <button
+                                type="button"
+                                onClick={() => handleZebraStockSubmit(currentZebraItem, zebraStockInput, safeZebraIndex, zebraItems)}
+                                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider py-3.5 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <CheckCircle className="w-4 h-4 text-white shrink-0" />
+                                Update Zebra Stock &amp; Next
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Horizontal Skip / Back Carousel Control bar */}
+                          <div className="flex items-center justify-between gap-3 pt-5 border-t border-zinc-150">
+                            <button
+                              type="button"
+                              disabled={safeZebraIndex === 0}
+                              onClick={() => {
+                                const prevIdx = safeZebraIndex - 1;
+                                setZebraCurrentIndex(prevIdx);
+                                const prevItem = zebraItems[prevIdx];
+                                setZebraStockInput(prevItem && prevItem.zebraStock !== undefined ? String(prevItem.zebraStock) : "");
+                                playBeepSoundAt(beepVolume);
+                              }}
+                              className="px-4 py-2 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 disabled:opacity-40 rounded-xl text-xs font-extrabold text-zinc-700 flex items-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              <ChevronLeft className="w-4 h-4 shrink-0 text-zinc-500" />
+                              <span>Previous SKU</span>
+                            </button>
+
+                            <div className="font-mono text-xs font-bold text-zinc-500">
+                              Item #{safeZebraIndex + 1} of {zebraItems.length}
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={safeZebraIndex >= zebraItems.length - 1}
+                              onClick={() => {
+                                const nextIdx = safeZebraIndex + 1;
+                                setZebraCurrentIndex(nextIdx);
+                                const nextItem = zebraItems[nextIdx];
+                                setZebraStockInput(nextItem && nextItem.zebraStock !== undefined ? String(nextItem.zebraStock) : "");
+                                playBeepSoundAt(beepVolume);
+                              }}
+                              className="px-4 py-2 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 disabled:opacity-40 rounded-xl text-xs font-extrabold text-zinc-700 flex items-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              <span>Skip Item</span>
+                              <ChevronRight className="w-4 h-4 shrink-0 text-zinc-500" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="text-center py-16">
+                          <p className="text-zinc-500 text-sm font-medium">No Products Available in Zebra Mode Queue.</p>
+                          <p className="text-zinc-400 text-xs mt-1">Try relaxing your search query or filter tags to reveal catalog assets.</p>
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: QUEUE LIST TRACKER (5 cols) */}
+              <div className="lg:col-span-5 space-y-6">
+                {(() => {
+                  const zebraItems = sortedProducts;
+                  const safeZebraIndex = Math.min(zebraCurrentIndex, Math.max(0, zebraItems.length - 1));
+                  const auditedCount = zebraItems.filter(p => p.zebraStock !== undefined).length;
+                  const progressPct = zebraItems.length > 0 ? Math.round((auditedCount / zebraItems.length) * 100) : 0;
+
+                  return (
+                    <div className="bg-white border border-zinc-200 rounded-3xl p-5 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-extrabold text-xs uppercase tracking-wider text-zinc-850 font-sans">
+                          Zebra Queue Timeline ({zebraItems.length} Products)
+                        </h3>
+                        <span className="text-[10px] font-mono text-zinc-500 bg-zinc-100 rounded px-2 py-0.5 font-bold">
+                          {auditedCount} Audited
+                        </span>
+                      </div>
+
+                      {/* Progressive visual percentage tracking bar */}
+                      <div className="font-sans">
+                        <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 leading-none mb-1.5">
+                          <span>Verification Progress</span>
+                          <span className="font-bold text-amber-900">{progressPct}%</span>
+                        </div>
+                        <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-amber-500 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="max-h-[460px] overflow-y-auto divide-y divide-zinc-100 border border-zinc-150 rounded-xl bg-zinc-50/20 shadow-xs">
+                        {zebraItems.map((item, idx) => {
+                          const isSelected = idx === safeZebraIndex;
+                          const hasAudited = item.zebraStock !== undefined;
+
+                          return (
+                            <div
+                              key={item.id}
+                              className={`p-3 text-left transition-all flex items-center justify-between cursor-pointer border-l-4 ${
+                                isSelected 
+                                  ? "bg-amber-500/10 border-amber-500" 
+                                  : "hover:bg-zinc-50/50 border-transparent"
+                              }`}
+                              onClick={() => {
+                                setZebraCurrentIndex(idx);
+                                setZebraStockInput(item.zebraStock !== undefined ? String(item.zebraStock) : "");
+                                playBeepSoundAt(beepVolume);
+                              }}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <p className={`text-xs font-extrabold truncate ${isSelected ? "text-amber-950 font-black font-sans" : "text-zinc-800 font-sans"}`}>
+                                  {item.name}
+                                </p>
+                                <p className="text-[10px] font-mono text-zinc-400 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+                                  <span>Loc: <strong className="text-zinc-600 font-bold">{item.location}</strong></span>
+                                  {" • "}
+                                  <span>Barcode: <strong className="text-zinc-500 font-medium">{item.barcode}</strong></span>
+                                </p>
+                              </div>
+
+                              <div className="shrink-0 text-right font-mono">
+                                {hasAudited ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className="bg-amber-100 text-amber-950 font-black text-[10px] px-1.5 py-0.5 rounded border border-amber-200">
+                                      {item.zebraStock}
+                                    </span>
+                                    <span className="text-[8px] text-zinc-400 font-bold mt-0.5">Audited</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-zinc-400 italic">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {zebraItems.length === 0 && (
+                          <div className="p-8 text-center text-zinc-400 text-xs italic font-sans">
+                            No active queue products matching criteria.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : isAuditMode ? (
             /* AUDIT WORKSPACE STATION WITH STEPS */
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
@@ -2557,6 +2963,8 @@ export default function App() {
                       <th className="py-2 text-right">Stock</th>
                       <th className="py-2 pl-4 text-center">Last Updated</th>
                       <th className="py-2 text-right">Audit level</th>
+                      <th className="py-2 text-right text-amber-800 font-black">Zebra Stock</th>
+                      <th className="py-2 text-right text-amber-800 font-bold">Zebra Last Updated</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-150">
@@ -2581,6 +2989,15 @@ export default function App() {
                         </td>
                         <td className="py-2 text-right font-mono text-zinc-600">
                           {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
+                        </td>
+                        <td className="py-2 text-right font-mono font-black text-amber-900 bg-amber-50/20">
+                          {i.zebraStock !== undefined ? i.zebraStock : "—"}
+                        </td>
+                        <td className="py-2 text-right font-mono text-[9px] text-zinc-500">
+                          {i.zebraLastUpdated 
+                            ? new Date(i.zebraLastUpdated).toLocaleString() 
+                            : "—"
+                          }
                         </td>
                       </tr>
                     ))}
@@ -2838,6 +3255,8 @@ export default function App() {
                               <th className="py-2 text-right">Physical Stock</th>
                               <th className="py-2 pl-4 text-center">Last Updated On</th>
                               <th className="py-2 text-right">Last Audit Count</th>
+                              <th className="py-2 text-right text-amber-800 font-extrabold">Zebra Stock</th>
+                              <th className="py-2 text-right text-amber-800 font-bold">Zebra Last Updated</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-150">
@@ -2862,6 +3281,15 @@ export default function App() {
                                 </td>
                                 <td className="py-2.5 text-right font-mono text-zinc-450">
                                   {i.lastUpdatedStock !== undefined ? i.lastUpdatedStock : "—"}
+                                </td>
+                                <td className="py-2.5 text-right font-mono font-black text-amber-900 bg-amber-50/10">
+                                  {i.zebraStock !== undefined ? i.zebraStock : "—"}
+                                </td>
+                                <td className="py-2.5 text-right font-mono text-[10px] text-zinc-500">
+                                  {i.zebraLastUpdated 
+                                    ? new Date(i.zebraLastUpdated).toLocaleString() 
+                                    : "—"
+                                  }
                                 </td>
                               </tr>
                             ))}

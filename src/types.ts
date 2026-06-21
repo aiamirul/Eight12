@@ -17,6 +17,8 @@ export interface InventoryItem {
   lastUpdatedTime?: string; // ISO or human string of last update
   lastUpdatedStock?: number; // Stock number before or at last update
   inactive?: boolean; // Set true if item is ignored/inactive
+  zebraStock?: number; // Zebra dynamic stock level
+  zebraLastUpdated?: string; // Zebra last audit timestamp
 }
 
 export interface StockChangeLog {
